@@ -8,6 +8,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import javax.servlet.ServletContext;
@@ -159,7 +160,11 @@ public class MockCreator {
         expect(ftInfo.getName()).andReturn(name).anyTimes();
         expect(ftInfo.getStore()).andReturn(ds).anyTimes();
         expect(ftInfo.getNamespace()).andReturn(ns).anyTimes();
-        expect(ftInfo.getFeatureType()).andReturn(ft).anyTimes();
+        try {
+            expect(ftInfo.getFeatureType()).andReturn(ft).anyTimes();
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to mock getFeatureType", e);
+        }
         expect(ftInfo.isEnabled()).andReturn(true).anyTimes();
         replay(ftInfo);
         return ftInfo;

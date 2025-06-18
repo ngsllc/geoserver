@@ -4,6 +4,8 @@
  */
 package org.geoserver.catalog;
 
+import java.util.ArrayList;
+import org.geoserver.data.test.MockCreator;
 import org.geoserver.test.GeoServerMockTestSupport;
 import org.junit.Before;
 import org.junit.Test;
@@ -14,7 +16,10 @@ public class LayerGroupHelperTest extends GeoServerMockTestSupport {
 
     @Before
     public void setUp() throws Exception {
-        helper = new LayerGroupHelper(getCatalog());
+        super.setUp();
+        // Create a mock LayerGroupInfo for testing
+        LayerGroupInfo mockLayerGroup = MockCreator.createLayerGroup("testGroup", new ArrayList<>());
+        helper = new LayerGroupHelper(getCatalog(), mockLayerGroup);
     }
 
     @Test
