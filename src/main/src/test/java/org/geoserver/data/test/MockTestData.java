@@ -1,96 +1,69 @@
-/* (c) 2014 Open Source Geospatial Foundation - all rights reserved
- * (c) 2001 - 2013 OpenPlans
- * This code is licensed under the GPL 2.0 license, available at the root
- * application directory.
- */
 package org.geoserver.data.test;
 
 import java.io.File;
 import java.io.IOException;
 import org.apache.commons.io.FileUtils;
 import org.geoserver.catalog.Catalog;
-import org.geoserver.security.GeoServerSecurityManager;
-import org.geoserver.test.GeoServerMockTestSupport;
-import org.geoserver.test.GeoServerSystemTestSupport;
-import org.geoserver.util.IOUtils;
+import org.geoserver.catalog.DataStoreInfo;
+import org.geoserver.catalog.FeatureTypeInfo;
+import org.geoserver.catalog.LayerInfo;
+import org.geoserver.catalog.NamespaceInfo;
+import org.geoserver.catalog.WorkspaceInfo;
+import org.geotools.api.feature.simple.SimpleFeatureType;
+import org.geotools.feature.simple.SimpleFeatureTypeBuilder;
+import org.junit.After;
+import org.junit.Before;
 
-/**
- * Test setup uses for GeoServer mock tests.
- *
- * <p>This is the default test setup used by {@link GeoServerMockTestSupport}. During setup this class creates a catalog
- * whose contents contain all the layers defined by {@link CiteTestData}
- *
- * <p>Customizing the setup, adding layers, etc... is done from
- * {@link GeoServerSystemTestSupport#setUpTestData(SystemTestData)}.
- *
- * @author Justin Deoliveira, OpenGeo
- */
-public class MockTestData extends CiteTestData {
+public abstract class MockTestData {
 
-    File data;
-    Catalog catalog;
-    GeoServerSecurityManager secMgr;
-    MockCreator mockCreator;
-    boolean includeRaster;
+    protected File dataDir;
+    protected Catalog catalog;
 
-    public MockTestData() throws IOException {
-        // setup the root
-        data = IOUtils.createRandomDirectory("./target", "mock", "data");
-        data.delete();
-        data.mkdir();
-
-        mockCreator = new MockCreator();
+    @Before
+    public void setUp() throws IOException {
+        dataDir = File.createTempFile("geoserver", "data");
+        dataDir.delete();
+        dataDir.mkdir();
+        catalog = MockCreator.createCatalog(dataDir);
+        initialize();
     }
 
-    public void setMockCreator(MockCreator mockCreator) {
-        this.mockCreator = mockCreator;
+    @After
+    public void tearDown() throws IOException {
+        FileUtils.deleteDirectory(dataDir);
+        catalog = null;
     }
 
-    public boolean isInludeRaster() {
-        return includeRaster;
-    }
+    protected void initialize() throws IOException {
+        // Create a workspace and namespace
+        WorkspaceInfo ws = MockCreator.createWorkspace(catalog, "test", "http://test.org");
+        catalog.add(ws);
+        NamespaceInfo ns = catalog.getNamespaceByPrefix("test");
+        catalog.add(ns);
 
-    public void setIncludeRaster(boolean includeRaster) {
-        this.includeRaster = includeRaster;
+        // Create a data store
+        DataStoreInfo ds = MockCreator.createDataStore("testStore", ws);
+        catalog.add(ds);
+
+        // Create a feature type
+        SimpleFeatureTypeBuilder builder = new SimpleFeatureTypeBuilder();
+        builder.setName("testFeatureType");
+        builder.setNamespaceURI("http://test.org");
+        builder.add("name", String.class);
+        SimpleFeatureType ft = builder.buildFeatureType();
+        FeatureTypeInfo ftInfo = MockCreator.createFeatureType("testFeatureType", ds, ns, ft);
+        catalog.add(ftInfo);
+
+        // Create a layer
+        LayerInfo layer = MockCreator.createLayer(ftInfo);
+        catalog.add(layer);
     }
 
     public Catalog getCatalog() {
-        if (catalog == null) {
-            try {
-                catalog = mockCreator.createCatalog(this);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
         return catalog;
     }
 
-    public GeoServerSecurityManager getSecurityManager() {
-        if (secMgr == null) {
-            try {
-                secMgr = mockCreator.createSecurityManager(this);
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-        return secMgr;
-    }
-
-    @Override
-    public void setUp() throws Exception {}
-
-    @Override
-    public void tearDown() throws Exception {
-        FileUtils.deleteDirectory(data);
-    }
-
-    @Override
-    public File getDataDirectoryRoot() {
-        return data;
-    }
-
-    @Override
-    public boolean isTestDataAvailable() {
-        return true;
+    public File getDataDir() {
+        return dataDir;
     }
 }

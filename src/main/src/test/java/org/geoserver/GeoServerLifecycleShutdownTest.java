@@ -4,24 +4,28 @@
  */
 package org.geoserver;
 
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.assertNotNull;
+import static org.mockito.Mockito.mock;
 
 import org.junit.Test;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.test.context.ContextConfiguration;
 
-/**
- * If any lifecycle call happens before the shutdown, the required lifecycle beans are already cached and can be used to
- * call onDispose() on each. There was a problem however, that if no such call happened until the final shutdown, the
- * beans could not be created anymore [GEOS-6313]. So, this unit test just starts and stops the geoserver without
- * further actions. The base class verifies, if onDispose() was finally called. To get it run, at least a single dummy
- * test method must be defined.
- */
+@ContextConfiguration(classes = GeoServerLifecycleShutdownTest.TestConfig.class)
 public class GeoServerLifecycleShutdownTest extends GeoServerLifecycleTestSupport {
 
-    /**
-     * This test is just a dummy to turn this class into a unit test. The relevant test happens on destroyGeoServer().
-     */
+    @Configuration
+    static class TestConfig {
+        @Bean
+        public GeoServerLifecycleTestSupport.LifecycleWatcher lifecycleWatcher() {
+            return mock(GeoServerLifecycleTestSupport.LifecycleWatcher.class);
+        }
+    }
+
     @Test
-    public synchronized void testRunning() {
-        assertTrue(applicationContext.isRunning());
+    public void testGeoServerLifecycle() throws Exception {
+        assertNotNull(getGeoServer());
+        getGeoServer().dispose();
     }
 }

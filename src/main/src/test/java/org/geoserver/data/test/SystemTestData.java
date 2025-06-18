@@ -294,9 +294,10 @@ public class SystemTestData extends CiteTestData {
         IOUtils.decompress(SystemTestData.class.getResourceAsStream("security.zip"), secDir);
         String javaVendor = System.getProperty("java.vendor");
         if (javaVendor.contains("IBM")) {
-            IOUtils.copy(new File(secDir, "geoserver.jceks.ibm"), new File(secDir, "geoserver.jceks"));
+            IOUtils.copy(new File(secDir, "geoserver.bcfks.ibm"), new File(secDir, "geoserver.bcfks"));
+            IOUtils.copy(new File(secDir, "geoserver.bcfks.default"), new File(secDir, "geoserver.bcfks"));
         } else {
-            IOUtils.copy(new File(secDir, "geoserver.jceks.default"), new File(secDir, "geoserver.jceks"));
+            IOUtils.copy(new File(secDir, "geoserver.bcfks.default"), new File(secDir, "geoserver.bcfks"));
         }
     }
 
