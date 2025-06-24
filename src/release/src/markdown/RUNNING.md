@@ -154,7 +154,56 @@ In order to install and run this application, follow these steps:
       address.  Please see your browser's documentation for how to check this.
 
 
-6. Further information
+6. Environment Variables
+
+    GeoServer supports several environment variables for configuration:
+
+    **Core Environment Variables:**
+    
+    * ``GEOSERVER_HOME`` - Points to the GeoServer installation directory
+    * ``GEOSERVER_DATA_DIR`` - Points to the GeoServer data directory  
+    * ``JAVA_HOME`` - Points to the Java installation directory
+
+    **Security Environment Variables:**
+    
+    * ``GEOSERVER_KEYSTORE_TYPE`` - Configures the keystore type for GeoServer security
+      
+      Supported values:
+      * ``JCEKS`` (default) - Java Cryptography Extension KeyStore
+      * ``BCFKS`` - Bouncy Castle FIPS Keystore (requires Bouncy Castle library)
+      * ``PKCS12`` - PKCS#12 format keystore
+      * Any other JVM-supported keystore type
+      
+      Example:
+      ```bash
+      export GEOSERVER_KEYSTORE_TYPE=BCFKS
+      ```
+      
+      For detailed keystore configuration and migration information, see ``KEYSTORE_CONFIGURATION.md``.
+
+    **Community Module Environment Variables:**
+    
+    * ``GEOSERVER_ACL_ENABLED`` - Enable/disable Access Control List plugin (default: true)
+    * ``GEOSERVER_ACL_CLIENT_BASEPATH`` - ACL service API base URL
+    * ``GEOSERVER_ACL_CLIENT_USERNAME`` - ACL service username
+    * ``GEOSERVER_ACL_CLIENT_PASSWORD`` - ACL service password
+    * ``GEOSERVER_ACL_CLIENT_CACHE_TTL`` - ACL authorization cache time-to-live (default: 30s)
+    
+    Example ACL configuration:
+    ```bash
+    export GEOSERVER_ACL_ENABLED=true
+    export GEOSERVER_ACL_CLIENT_BASEPATH=https://example.com/acl/api
+    export GEOSERVER_ACL_CLIENT_USERNAME=geoserver
+    export GEOSERVER_ACL_CLIENT_PASSWORD=ch4ng3m3
+    export GEOSERVER_ACL_CLIENT_CACHE_TTL=PT30S
+    ```
+
+    **Test Environment Variables:**
+    
+    * ``geoserver_api_url`` - REST API URL for integration tests (default: http://localhost:18080/geoserver/rest)
+
+
+7. Further information
 
     For more information about configuring and running GeoServer, please see the 
     GeoServer documentation:
