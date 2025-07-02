@@ -61,8 +61,8 @@
   <bean id="strongPbePasswordEncoder"    
     class="org.geoserver.security.password.GeoServerPBEPasswordEncoder" scope="prototype">
     <property name="prefix" value="crypt2" />
-    <property name="providerName" value="BC" />
-    <property name="algorithm" value="PBEWITHSHA256AND256BITAES-CBC-BC" />
+    <property name="providerName" value="" />
+    <property name="algorithm" value="PBEWithSHA1AndDESede" />
     <property name="availableWithoutStrongCryptogaphy" value="false" />
   </bean>  
   <bean id="digestPasswordEncoder"    

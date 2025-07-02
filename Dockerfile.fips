@@ -1,0 +1,79 @@
+# FIPS-enabled GeoServer Docker image
+FROM registry.access.redhat.com/ubi8/openjdk-11
+
+# Set environment variables for FIPS mode
+ENV JAVA_OPTS="-Dcom.redhat.fips=true -Djava.security.properties=/opt/geoserver/security/java.security"
+ENV GEOSERVER_KEYSTORE_TYPE=BCFKS
+ENV GEOSERVER_KEYSTORE_PROVIDER=BC
+
+# Switch to root to install packages
+USER root
+# Install required packages
+RUN microdnf update -y && microdnf install -y \
+    ca-certificates \
+    unzip \
+    wget \
+    && microdnf clean all
+
+# Create GeoServer directory
+WORKDIR /opt/geoserver
+
+# Copy and setup Jetty (downloaded on host)
+COPY jetty-distribution-9.4.44.v20210927.tar.gz .
+RUN tar -xzf jetty-distribution-9.4.44.v20210927.tar.gz && \
+    mv jetty-distribution-9.4.44.v20210927/* . && \
+    rm -rf jetty-distribution-9.4.44.v20210927 jetty-distribution-9.4.44.v20210927.tar.gz
+
+# Create lib directory for Bouncy Castle JARs (after Jetty extraction)
+RUN mkdir -p /opt/geoserver/lib && \
+    wget https://repo1.maven.org/maven2/org/bouncycastle/bcprov-jdk18on/1.77/bcprov-jdk18on-1.77.jar -O /opt/geoserver/lib/bcprov.jar && \
+    wget https://repo1.maven.org/maven2/org/bouncycastle/bcpkix-jdk18on/1.77/bcpkix-jdk18on-1.77.jar -O /opt/geoserver/lib/bcpkix.jar
+
+# Copy the built GeoServer WAR file
+COPY src/web/app/target/geoserver.war /opt/geoserver/webapps/geoserver.war
+
+# Ensure security directory exists
+RUN mkdir -p /opt/geoserver/security
+
+# Copy FIPS utilities JAR for testing and migration
+COPY fips-utils.jar /opt/geoserver/lib/fips-utils.jar
+RUN ls -la /opt/geoserver/lib/fips-utils.jar
+
+# Create custom java.security file for FIPS compliance
+RUN echo "# FIPS-compliant Java security configuration" > /opt/geoserver/security/java.security && \
+    echo "security.provider.1=SUN" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.2=SunRsaSign" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.3=SunEC" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.4=SunJSSE" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.5=SunJCE" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.6=SunJGSS" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.7=SunSASL" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.8=XMLDSig" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.9=SunPCSC" >> /opt/geoserver/security/java.security && \
+    echo "security.provider.10=BC" >> /opt/geoserver/security/java.security
+
+# Fix permissions for user 185
+RUN chown -R 185:0 /opt/geoserver
+
+# Switch back to default user
+USER 185
+
+# Create startup script
+RUN echo '#!/bin/bash' > /opt/geoserver/start-fips.sh && \
+    echo 'echo "Starting GeoServer in FIPS mode..."' >> /opt/geoserver/start-fips.sh && \
+    echo 'echo "FIPS Mode: $FIPS_MODE"' >> /opt/geoserver/start-fips.sh && \
+    echo 'echo "Keystore Type: $GEOSERVER_KEYSTORE_TYPE"' >> /opt/geoserver/start-fips.sh && \
+    echo 'echo "Adding Bouncy Castle provider..."' >> /opt/geoserver/start-fips.sh && \
+    echo 'export CLASSPATH="/opt/geoserver/lib/bcprov.jar:/opt/geoserver/lib/bcpkix.jar:$CLASSPATH"' >> /opt/geoserver/start-fips.sh && \
+    echo 'java $JAVA_OPTS -cp "/opt/geoserver/lib/bcprov.jar:/opt/geoserver/lib/bcpkix.jar" -Djava.security.debug=provider -jar start.jar' >> /opt/geoserver/start-fips.sh && \
+    chmod +x /opt/geoserver/start-fips.sh
+
+# Expose GeoServer port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8080/geoserver/web/ || exit 1
+
+# Start GeoServer
+CMD ["/opt/geoserver/start-fips.sh"] 

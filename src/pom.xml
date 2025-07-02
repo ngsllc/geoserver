@@ -49,6 +49,8 @@
     <module>web</module>
     <module>community</module>
     <module>extension</module>
+    <module>web/app</module>
+    <module>fips-utils</module>
   </modules>
 
   <scm>

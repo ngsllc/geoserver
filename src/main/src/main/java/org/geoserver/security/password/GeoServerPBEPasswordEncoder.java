@@ -39,6 +39,10 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
 
     private KeyStoreProvider keystoreProvider;
 
+    public GeoServerPBEPasswordEncoder() {
+        // Default constructor - algorithm will be set via setter
+    }
+
     @Override
     public void initialize(GeoServerSecurityManager securityManager) throws IOException {
         this.keystoreProvider = securityManager.getKeyStoreProvider();
@@ -61,7 +65,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     }
 
     public void setProviderName(String providerName) {
-        this.providerName = providerName;
+        this.providerName = providerName; // Allow null for default provider
     }
 
     public String getAlgorithm() {
