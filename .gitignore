@@ -45,3 +45,6 @@ src/release/installer/win/target/
 
 # Eclipse stuff
 src/web/app/.temp-Start*
+
+# Ignore Maven's dependency-reduced POM
+src/fips-utils/dependency-reduced-pom.xml
