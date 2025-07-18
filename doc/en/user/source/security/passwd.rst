@@ -71,6 +71,8 @@ Secret keys and the keystore
 
 For a reversible password to provide a meaningful level of security, access to the password must be restricted in some way. In GeoServer, encrypting and decrypting passwords involves the generation of secret shared keys, stored in a typical Java *keystore*. GeoServer uses its own keystore for this purpose named ``geoserver.jceks`` which is located in the ``security`` directory in the GeoServer data directory. This file is stored in the `JCEKS format rather than the default JKS <http://www.itworld.com/nl/java_sec/07202001>`_. JKS does not support storing shared keys.
 
+.. note:: For FIPS-compliant environments, GeoServer provides a FIPS-compliant keystore provider. See :ref:`security_fips` for more information about FIPS compliance and keystore configuration.
+
 The GeoServer keystore is password protected with a :ref:`security_master_passwd`. It is possible to access the contents of the keystore with external tools such as `keytool <http://docs.oracle.com/javase/6/docs/technotes/tools/solaris/keytool.html>`_. For example, this following command would prompt for the keystore password and list the contents of the keystore:
 
 .. code-block:: bash

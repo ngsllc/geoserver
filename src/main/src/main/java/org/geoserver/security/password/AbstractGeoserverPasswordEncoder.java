@@ -35,7 +35,11 @@ public abstract class AbstractGeoserverPasswordEncoder implements GeoServerPassw
     private String prefix;
 
     static {
-        Security.addProvider(new BouncyCastleProvider());
+        try {
+            Security.addProvider(new BouncyCastleProvider());
+        } catch (Exception e) {
+            LOGGER.warning("Could not add BouncyCastle provider: " + e.getMessage());
+        }
     }
 
     @Override

@@ -14,6 +14,7 @@ The first page discusses configuration options in the web administration interfa
    usergrouprole/index
    auth/index
    passwd
+   fips
    root
    service
    layer
