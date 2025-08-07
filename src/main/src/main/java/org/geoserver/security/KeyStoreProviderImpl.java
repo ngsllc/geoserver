@@ -31,15 +31,21 @@ import org.springframework.beans.factory.BeanNameAware;
  *
  * <p><strong>requires a master password</strong> form {@link MasterPasswordProviderImpl}
  *
- * <p>The type of the keystore is JCEKS and can be used/modified with java tools like "keytool" from the command line. *
+ * <p>The type of the keystore can be configured via the GEOSERVER_KEYSTORE_TYPE environment variable. If not set,
+ * defaults to JCEKS. Supported types include JCEKS, BCFKS, and others supported by the JVM. The keystore can be
+ * used/modified with java tools like "keytool" from the command line.
  *
  * @author christian
  */
 public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     public static final String DEFAULT_BEAN_NAME = "DefaultKeyStoreProvider";
-    public static final String DEFAULT_FILE_NAME = "geoserver.jceks";
-    public static final String PREPARED_FILE_NAME = "geoserver.jceks.new";
+    public static final String KEYSTORE_TYPE_ENV_VAR = "GEOSERVER_KEYSTORE_TYPE";
+    public static final String DEFAULT_KEYSTORE_TYPE = "JCEKS";
+
+    // Dynamic file names based on keystore type
+    private String defaultFileName;
+    private String preparedFileName;
 
     public static final String CONFIGPASSWORDKEY = "config:password:key";
     public static final String URLPARAMKEY = "url:param:key";
@@ -51,11 +57,42 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     protected Resource keyStoreResource;
     protected KeyStore ks;
 
-    public static final String KEYSTORETYPE = "JCEKS";
-
     GeoServerSecurityManager securityManager;
 
-    public KeyStoreProviderImpl() {}
+    public KeyStoreProviderImpl() {
+        initializeFileNames();
+    }
+
+    /** Gets the keystore type from environment variable or defaults to JCEKS */
+    public static String getKeyStoreType() {
+        String envType = System.getenv(KEYSTORE_TYPE_ENV_VAR);
+        if (envType != null && !envType.trim().isEmpty()) {
+            return envType.trim();
+        }
+        String propType = System.getProperty(KEYSTORE_TYPE_ENV_VAR);
+        if (propType != null && !propType.trim().isEmpty()) {
+            return propType.trim();
+        }
+        return DEFAULT_KEYSTORE_TYPE;
+    }
+
+    /** Initialize file names based on the keystore type */
+    private void initializeFileNames() {
+        String keystoreType = getKeyStoreType();
+        String extension = keystoreType.toLowerCase();
+        this.defaultFileName = "geoserver." + extension;
+        this.preparedFileName = "geoserver." + extension + ".new";
+    }
+
+    /** Gets the default file name for the current keystore type */
+    public String getDefaultFileName() {
+        return defaultFileName;
+    }
+
+    /** Gets the prepared file name for the current keystore type */
+    public String getPreparedFileName() {
+        return preparedFileName;
+    }
 
     @Override
     public void setBeanName(String name) {
@@ -81,7 +118,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     @Override
     public Resource getResource() {
         if (keyStoreResource == null) {
-            keyStoreResource = securityManager.security().get(DEFAULT_FILE_NAME);
+            keyStoreResource = securityManager.security().get(getDefaultFileName());
         }
         return keyStoreResource;
     }
@@ -215,8 +252,9 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
         char[] passwd = securityManager.getMasterPassword();
         try {
-            ks = KeyStore.getInstance(KEYSTORETYPE);
-            if (getResource().getType() == Type.UNDEFINED) { // create an empy one
+            String keystoreType = getKeyStoreType();
+            ks = KeyStore.getInstance(keystoreType);
+            if (getResource().getType() == Type.UNDEFINED) { // create an empty one
                 ks.load(null, passwd);
                 addInitialKeys();
                 try (OutputStream fos = getResource().out()) {
@@ -246,7 +284,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
         KeyStore testStore = null;
         try {
-            testStore = KeyStore.getInstance(KEYSTORETYPE);
+            String keystoreType = getKeyStoreType();
+            testStore = KeyStore.getInstance(keystoreType);
         } catch (KeyStoreException e1) {
             // should not happen, see assertActivatedKeyStore
             throw new RuntimeException(e1);
@@ -339,18 +378,19 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     public void prepareForMasterPasswordChange(char[] oldPassword, char[] newPassword) throws IOException {
 
         Resource dir = getResource().parent();
-        Resource newKSFile = dir.get(PREPARED_FILE_NAME);
+        Resource newKSFile = dir.get(getPreparedFileName());
         if (newKSFile.getType() != Type.UNDEFINED) {
             newKSFile.delete();
         }
 
         try {
-            KeyStore oldKS = KeyStore.getInstance(KEYSTORETYPE);
+            String keystoreType = getKeyStoreType();
+            KeyStore oldKS = KeyStore.getInstance(keystoreType);
             try (InputStream fin = getResource().in()) {
                 oldKS.load(fin, oldPassword);
             }
 
-            KeyStore newKS = KeyStore.getInstance(KEYSTORETYPE);
+            KeyStore newKS = KeyStore.getInstance(keystoreType);
             newKS.load(null, newPassword);
             KeyStore.PasswordProtection protectionparam = new KeyStore.PasswordProtection(newPassword);
 
@@ -392,8 +432,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     @Override
     public void commitMasterPasswordChange() throws IOException {
         Resource dir = getResource().parent();
-        Resource newKSFile = dir.get(PREPARED_FILE_NAME);
-        Resource oldKSFile = dir.get(DEFAULT_FILE_NAME);
+        Resource newKSFile = dir.get(getPreparedFileName());
+        Resource oldKSFile = dir.get(getDefaultFileName());
 
         if (newKSFile.getType() == Type.UNDEFINED) {
             return; // nothing to do
@@ -408,7 +448,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         char[] passwd = securityManager.getMasterPassword();
         try {
             try (InputStream fin = newKSFile.in()) {
-                KeyStore newKS = KeyStore.getInstance(KEYSTORETYPE);
+                String keystoreType = getKeyStoreType();
+                KeyStore newKS = KeyStore.getInstance(keystoreType);
                 newKS.load(fin, passwd);
 
                 // to be sure, decrypt all keys
