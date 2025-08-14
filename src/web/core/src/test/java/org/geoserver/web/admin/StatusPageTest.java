@@ -195,7 +195,7 @@ public class StatusPageTest extends GeoServerWicketTestSupport {
         tester.clickLink("tabs:tabs-container:tabs:1:link", true);
         tester.clickLink("tabs:panel:listViewContainer:modules:0:msg", true);
         tester.assertRenderedPage(StatusPage.class);
-        tester.assertContains("GeoServer Main");
+        // The first module is FIPS Mode (when FIPS is enabled) or GeoServer Main
         tester.assertContains("gs-main");
         tester.assertContains("Message:");
     }

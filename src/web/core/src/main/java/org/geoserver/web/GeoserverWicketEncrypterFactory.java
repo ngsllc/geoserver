@@ -20,7 +20,6 @@ import org.apache.wicket.request.cycle.RequestCycle;
 import org.apache.wicket.util.crypt.AbstractCrypt;
 import org.apache.wicket.util.crypt.ICrypt;
 import org.apache.wicket.util.crypt.ICryptFactory;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geotools.util.logging.Logging;
@@ -105,16 +104,15 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
 
         StandardPBEByteEncryptor enc = new StandardPBEByteEncryptor();
         enc.setPasswordCharArray(key);
+        // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+        enc.setSaltGenerator(new org.geoserver.security.password.FipsRandomSaltGenerator());
+        enc.setIvGenerator(new org.geoserver.security.password.FipsRandomIvGenerator());
         // since the password is copied, we can scramble it
         manager.disposePassword(key);
 
-        if (manager.isStrongEncryptionAvailable()) {
-            enc.setProvider(new BouncyCastleProvider());
-            enc.setAlgorithm("PBEWITHSHA256AND128BITAES-CBC-BC");
-        } else {
-            // US export restrictions
-            enc.setAlgorithm("PBEWITHMD5ANDDES");
-        }
+        // Always use FIPS-compatible algorithm - PBEWithHmacSHA256AndAES_128 works in both
+        // FIPS and non-FIPS modes. PBEWITHMD5ANDDES is blocked on FIPS-enabled systems.
+        enc.setAlgorithm("PBEWithHmacSHA256AndAES_128");
 
         result = new CryptImpl(enc);
         s.setAttribute(ICRYPT_ATTR_NAME, result);

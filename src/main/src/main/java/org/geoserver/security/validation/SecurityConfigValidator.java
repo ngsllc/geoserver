@@ -106,6 +106,8 @@ public class SecurityConfigValidator extends AbstractSecurityValidator {
             encoder = manager.loadPasswordEncoder(config.getConfigPasswordEncrypterName());
         } catch (NoSuchBeanDefinitionException ex) {
             throw createSecurityException(INVALID_PASSWORD_ENCODER_$1, encrypterName);
+        } catch (Exception ex) {
+            throw createSecurityException(INVALID_CONFIG_PASSWORD_ENCODER_$1, ex.getMessage());
         }
         if (encoder == null) {
             throw createSecurityException(INVALID_PASSWORD_ENCODER_$1, encrypterName);
