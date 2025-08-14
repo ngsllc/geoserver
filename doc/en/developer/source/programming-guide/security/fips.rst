@@ -8,15 +8,25 @@ This section provides information for developers working with FIPS-compliant fea
 FIPS-aware keystore handling
 ---------------------------
 
-GeoServer's ``KeyStoreProviderImpl`` detects FIPS mode via the ``FIPS_MODE`` environment variable and automatically
-selects the appropriate keystore type: BCFKS for FIPS mode, JCEKS for non-FIPS mode. It also automatically migrates
-keystores between formats when FIPS mode changes, infers the keystore type from the filename extension, and falls
-back to legacy keystore files if the configured file is not present.
+GeoServer's ``KeyStoreProviderImpl`` detects FIPS mode using the following priority:
+
+1. **OS-level FIPS**: Checks ``/proc/sys/crypto/fips_enabled`` on Linux (cannot be overridden)
+2. **System property**: ``-DFIPS_MODE=true``  
+3. **Environment variable**: ``FIPS_MODE=true``
+
+Based on this detection, it automatically selects the appropriate keystore type: BCFKS for FIPS mode, JCEKS for 
+non-FIPS mode. It also automatically migrates keystores between formats when FIPS mode changes, infers the 
+keystore type from the filename extension, and falls back to legacy keystore files if the configured file is 
+not present.
+
+.. note::
+   On systems with OS-level FIPS enabled, attempting to set ``FIPS_MODE=false`` will log a warning and 
+   FIPS mode will remain enabled. OS-level FIPS cannot be overridden by application configuration.
 
 Key Features
 ~~~~~~~~~~~
 
-* **Automatic FIPS Detection**: Detects FIPS mode through system properties (highest priority) or environment variables
+* **Automatic FIPS Detection**: Detects OS-level FIPS first (highest priority, immutable), then system properties, then environment variables
 * **Filename Inference**: Infers keystore type from extension
 * **Legacy Fallback**: Falls back to legacy keystore files when the configured one is missing
 * **Provider Fallback**: Registers/uses BouncyCastle providers for BCFKS when necessary
@@ -42,7 +52,13 @@ GeoServer includes BC-FIPS libraries by default. No special profiles are needed.
 * BCFKS and JCEKS keystore support
 
 **Technical Implementation:**
-* ``KeyStoreProviderImpl.isFipsMode()`` detects FIPS mode via ``FIPS_MODE`` environment variable
+
+* ``KeyStoreProviderImpl.isFipsMode()`` detects FIPS mode by checking:
+  
+  1. ``isOsFipsEnabled()`` - reads ``/proc/sys/crypto/fips_enabled`` (immutable)
+  2. System property ``FIPS_MODE``
+  3. Environment variable ``FIPS_MODE``
+
 * ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` loads FIPS provider when needed
 * Automatic keystore type selection: BCFKS (FIPS) or JCEKS (non-FIPS)
 
