@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
 import org.geoserver.config.util.XStreamPersister;
@@ -27,12 +28,14 @@ import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.resource.Resource.Type;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geoserver.security.GeoServerSecurityProvider;
+import org.geoserver.security.KeyStoreProviderImpl;
 import org.geoserver.security.MasterPasswordProvider;
 import org.geoserver.security.SecurityUtils;
 import org.geoserver.security.config.SecurityNamedServiceConfig;
 import org.geoserver.security.validation.SecurityConfigException;
 import org.geoserver.security.validation.SecurityConfigValidator;
 import org.geotools.util.URLs;
+import org.geotools.util.logging.Logging;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
 
 /**
@@ -41,6 +44,8 @@ import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
  * @author Justin Deoliveira, OpenGeo
  */
 public final class URLMasterPasswordProvider extends MasterPasswordProvider {
+
+    private static final Logger LOGGER = Logging.getLogger(URLMasterPasswordProvider.class);
 
     /** base encryption key */
     //    static final char[] BASE = new char[]{ 'a', 'f', '8', 'd', 'f', 's', 's', 'v', 'j', 'K',
@@ -98,6 +103,12 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
         return getSecurityManager().masterPasswordProvider().get(getName());
     }
 
+    /** FIPS-compatible algorithm for PBE encryption */
+    static final String FIPS_PBE_ALGORITHM = "PBEWithHmacSHA256AndAES_128";
+
+    /** Legacy algorithm (not FIPS-compliant) */
+    static final String LEGACY_PBE_ALGORITHM = "PBEWithMD5AndDES";
+
     byte[] encode(char[] passwd) {
 
         if (!config.isEncrypting()) {
@@ -106,6 +117,10 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
 
         // encrypt the password
         StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
+        // Use FIPS-compatible algorithm and generators
+        encryptor.setAlgorithm(FIPS_PBE_ALGORITHM);
+        encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
+        encryptor.setIvGenerator(new FipsRandomIvGenerator());
 
         char[] key = key();
         try {
@@ -121,14 +136,96 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             return passwd;
         }
 
-        // decrypt the password
+        // Try FIPS-compatible algorithm first
+        try {
+            return decodeWithAlgorithm(passwd, FIPS_PBE_ALGORITHM);
+        } catch (Exception e) {
+            // If FIPS algorithm failed and we're not in FIPS mode, try legacy algorithm
+            if (!KeyStoreProviderImpl.isFipsMode()) {
+                try {
+                    // Use null algorithm to match original GeoServer behavior (Jasypt default)
+                    byte[] decoded = decodeWithAlgorithm(passwd, null);
+                    // Successfully decoded with legacy algorithm - migrate to FIPS algorithm
+                    LOGGER.info(
+                            "Master password was encrypted with legacy algorithm, migrating to FIPS-compatible algorithm");
+                    migrateToFipsAlgorithm(decoded);
+                    return decoded;
+                } catch (Exception legacyEx) {
+                    // Both algorithms failed
+                    throw new RuntimeException(
+                            "Failed to decrypt master password with both FIPS and legacy algorithms", e);
+                }
+            } else {
+                // In FIPS mode and FIPS algorithm failed - probably legacy encrypted
+                throw new RuntimeException(
+                        "Failed to decrypt master password in FIPS mode. "
+                                + "The password may have been encrypted with a legacy algorithm (PBEWithMD5AndDES). "
+                                + "Please migrate your security directory on a non-FIPS system first, or delete the security directory to start fresh.",
+                        e);
+            }
+        }
+    }
+
+    private byte[] decodeWithAlgorithm(byte[] passwd, String algorithm) {
         StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
+        if (algorithm != null) {
+            encryptor.setAlgorithm(algorithm);
+            // FIPS algorithm also needs FIPS-compatible salt/IV generators for decryption
+            if (FIPS_PBE_ALGORITHM.equals(algorithm)) {
+                encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
+                encryptor.setIvGenerator(new FipsRandomIvGenerator());
+            }
+        }
+        // For null algorithm (legacy), don't set anything - use Jasypt defaults
         char[] key = key();
         try {
             encryptor.setPasswordCharArray(key);
             return encryptor.decrypt(Base64.decodeBase64(passwd));
         } finally {
             scramble(key);
+        }
+    }
+
+    private void migrateToFipsAlgorithm(byte[] decryptedPassword) {
+        try {
+            Resource configDir = getConfigDir();
+            URL url = config.getURL();
+
+            // Create backup of the original encrypted file before migration
+            if ("file".equalsIgnoreCase(url.getProtocol())) {
+                File originalFile = URLs.urlToFile(url);
+                if (!originalFile.isAbsolute()) {
+                    // Relative path - backup within config dir
+                    Resource originalRes = configDir.get(originalFile.getPath());
+                    Resource backupRes = configDir.get(originalFile.getPath() + ".backup");
+                    if (originalRes.getType() == Type.RESOURCE) {
+                        try (InputStream in = originalRes.in();
+                             OutputStream out = backupRes.out()) {
+                            IOUtils.copy(in, out);
+                        }
+                        LOGGER.info("Created backup of master password file: " + backupRes.name());
+                    }
+                } else {
+                    // Absolute path - backup alongside original
+                    File backupFile = new File(originalFile.getPath() + ".backup");
+                    java.nio.file.Files.copy(
+                            originalFile.toPath(),
+                            backupFile.toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    LOGGER.info("Created backup of master password file: " + backupFile.getPath());
+                }
+            }
+
+            // Re-encrypt with FIPS algorithm and save
+            char[] passwd = toChars(decryptedPassword);
+            try (OutputStream out = output(url, configDir)) {
+                out.write(encode(passwd));
+            }
+            scramble(passwd);
+            LOGGER.info("Successfully migrated master password to FIPS-compatible encryption");
+        } catch (Exception e) {
+            LOGGER.warning("Failed to migrate master password to FIPS algorithm: " + e.getMessage());
+            // Don't throw - we successfully decoded, migration is best-effort
         }
     }
 

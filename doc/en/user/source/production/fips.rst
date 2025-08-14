@@ -218,25 +218,43 @@ The FIPS implementation automatically registers the BouncyCastle FIPS provider w
 * **BCFIPS Provider**: Used for all BouncyCastle cryptographic operations
 * **Automatic Detection**: The system automatically registers the BCFIPS provider if not already available
 
-Property Precedence
-~~~~~~~~~~~~~~~~~~
+FIPS Detection Priority
+~~~~~~~~~~~~~~~~~~~~~~~
 
-The `FIPS_MODE` setting is resolved in the following order:
+GeoServer detects FIPS mode in the following order:
 
-1. System property `-DFIPS_MODE` (highest priority - allows runtime override)
-2. Environment variable `FIPS_MODE` 
-3. Default: `false` (non-FIPS mode)
+1. **OS-level FIPS** (highest priority - **cannot be overridden**)
+   
+   On Linux, GeoServer checks ``/proc/sys/crypto/fips_enabled``. If this file contains ``1``, 
+   FIPS mode is enabled and cannot be disabled via environment variables or system properties.
+   A warning is logged if users attempt to set ``FIPS_MODE=false`` on an OS-level FIPS system.
 
-This priority order allows system properties to override environment variables, which is useful for:
-- Testing with different FIPS modes without changing the environment
+2. **System property** ``-DFIPS_MODE=true``
+   
+   Allows runtime override when OS-level FIPS is not enabled.
+
+3. **Environment variable** ``FIPS_MODE=true``
+   
+   Fallback when neither OS-level FIPS nor system property is set.
+
+4. **Default**: ``false`` (non-FIPS mode)
+
+This priority order ensures:
+
+- OS-level FIPS enforcement cannot be bypassed by application configuration
+- System properties can override environment variables for testing
 - Per-instance configuration in containerized deployments
-- Temporary overrides for debugging
+- Temporary overrides for debugging (on non-FIPS systems)
 
 Examples:
 
 .. code-block:: bash
 
-   # System property (highest priority - overrides environment)
+   # On OS-level FIPS system (e.g., RHEL/Rocky Linux with FIPS enabled)
+   # FIPS mode is automatically enabled - no configuration needed
+   java -jar geoserver.war  # FIPS enabled via OS detection
+
+   # System property (overrides environment, but not OS-level FIPS)
    java -DFIPS_MODE=true -jar geoserver.war
 
    # Environment variable
@@ -247,7 +265,7 @@ Examples:
    export FIPS_MODE=false
    java -DFIPS_MODE=true -jar geoserver.war  # FIPS will be enabled
 
-   # Default (FIPS disabled)
+   # Default (FIPS disabled, only works on non-FIPS OS)
    java -jar geoserver.war
 
 Security Considerations

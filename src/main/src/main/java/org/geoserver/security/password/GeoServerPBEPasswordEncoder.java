@@ -33,6 +33,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  */
 public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncoder {
 
+    /** Algorithms that are NOT FIPS-compliant and cannot be used when FIPS mode is enabled */
+    private static final java.util.Set<String> NON_FIPS_ALGORITHMS =
+            java.util.Set.of("PBEWITHMD5ANDDES", "PBEWITHMD5ANDTRIPLEDES", "PBEWITHSHA1ANDDES", "PBEWITHSHA1ANDDESEDE");
+
     StandardPBEStringEncryptor stringEncrypter;
     StandardPBEByteEncryptor byteEncrypter;
 
@@ -44,6 +48,11 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     @Override
     public void initialize(GeoServerSecurityManager securityManager) throws IOException {
         this.keystoreProvider = securityManager.getKeyStoreProvider();
+        if (KeyStoreProviderImpl.isFipsMode()
+                && algorithm != null
+                && NON_FIPS_ALGORITHMS.contains(algorithm.toUpperCase())) {
+            throw new IOException("Algorithm '" + algorithm + "' not available in FIPS mode");
+        }
     }
 
     @Override
@@ -87,6 +96,9 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
         try {
             stringEncrypter = new StandardPBEStringEncryptor();
             stringEncrypter.setPasswordCharArray(chars);
+            // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+            stringEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+            stringEncrypter.setIvGenerator(new FipsRandomIvGenerator());
 
             ensureProviderAvailableIfRequested();
             if (getProviderName() != null && !getProviderName().isEmpty())
@@ -111,6 +123,9 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
 
         byteEncrypter = new StandardPBEByteEncryptor();
         byteEncrypter.setPasswordCharArray(chars);
+        // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+        byteEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+        byteEncrypter.setIvGenerator(new FipsRandomIvGenerator());
         ensureProviderAvailableIfRequested();
         if (getProviderName() != null && !getProviderName().isEmpty()) byteEncrypter.setProviderName(getProviderName());
         byteEncrypter.setAlgorithm(getAlgorithm());

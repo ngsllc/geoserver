@@ -8,14 +8,21 @@ This section describes GeoServer's FIPS (Federal Information Processing Standard
 Overview
 --------
 
-GeoServer includes a FIPS-aware keystore provider that can operate in FIPS-enabled environments. The built-in ``KeyStoreProviderImpl`` automatically detects FIPS mode via the ``FIPS_MODE`` environment variable and uses appropriate cryptographic providers and keystore types.
+GeoServer includes a FIPS-aware keystore provider that can operate in FIPS-enabled environments. The built-in ``KeyStoreProviderImpl`` automatically detects FIPS mode using the following priority:
+
+1. **OS-level FIPS**: Checks ``/proc/sys/crypto/fips_enabled`` on Linux (cannot be overridden)
+2. **System property**: ``-DFIPS_MODE=true``
+3. **Environment variable**: ``FIPS_MODE=true``
+
+On systems with OS-level FIPS enabled, GeoServer automatically operates in FIPS mode without any additional configuration. The ``FIPS_MODE`` setting cannot disable FIPS on these systems.
 
 FIPS KeyStore Provider
 ---------------------
 
 GeoServer's keystore provider automatically:
 
-* Detects FIPS mode through system properties and environment variables
+* Detects OS-level FIPS mode via ``/proc/sys/crypto/fips_enabled`` (highest priority, cannot be overridden)
+* Detects FIPS mode through system properties and environment variables (when OS-level FIPS is not enabled)
 * Uses FIPS-compliant cryptographic providers when available
 * Falls back to standard providers when FIPS providers are not available
 * Configures appropriate keystore types for FIPS environments
@@ -153,14 +160,23 @@ Common Issues
    * Check that the cryptographic provider is available
    * Review the GeoServer logs for detailed error messages
 
-3. **Performance Issues**
+3. **Password Encoder Not Available (crypt1: passwords)**
+   
+   If you see errors about password encoders or ``crypt1:`` prefixed passwords failing in FIPS mode:
+   
+   * The weak password encoder (``pbePasswordEncoder``) uses ``PBEWITHMD5ANDDES`` algorithm
+   * MD5 and DES algorithms are blocked on FIPS-enabled operating systems
+   * You must migrate passwords from ``crypt1:`` to ``crypt2:`` format before enabling FIPS mode
+   
+   See the :ref:`Password Migration <fips_password_migration>` section below for instructions.
+
+4. **Performance Issues**
    
    FIPS-compliant cryptographic operations may be slower than standard operations:
    
    * This is normal behavior for FIPS-compliant cryptography
    * Consider using hardware acceleration if available
    * Monitor system performance and adjust resources as needed
-
 
 
 Debug Mode
@@ -192,4 +208,70 @@ The FIPS keystore provider is designed to support:
 * **Common Criteria**: International security standards
 * **NIST Guidelines**: National Institute of Standards and Technology recommendations
 
-For specific compliance requirements, consult your organization's security policies and the relevant standards documentation. 
+For specific compliance requirements, consult your organization's security policies and the relevant standards documentation.
+
+.. _fips_password_migration:
+
+Password Migration for FIPS
+---------------------------
+
+When running on a FIPS-enabled operating system (such as Rocky Linux 9 with FIPS mode enabled), the weak password encoder 
+(``pbePasswordEncoder``) that uses the ``PBEWITHMD5ANDDES`` algorithm is **not available** because MD5 and DES algorithms 
+are blocked at the OS level.
+
+**Understanding Password Prefixes:**
+
+* ``crypt1:`` - Passwords encoded with weak ``PBEWITHMD5ANDDES`` algorithm (NOT FIPS-compliant)
+* ``crypt2:`` - Passwords encoded with strong ``PBEWITHSHA256AND256BITAES-BC`` algorithm (FIPS-compliant)
+
+**Migration Steps (Recommended - Auto-Migration):**
+
+The simplest approach is to use GeoServer's automatic migration feature:
+
+1. **Temporarily disable OS-level FIPS** (e.g., remove ``fips=1`` from kernel parameters and reboot)
+
+2. **Set the FIPS_MODE environment variable**:
+
+   .. code-block:: bash
+   
+      export FIPS_MODE=true
+
+3. **Restart GeoServer** - it will automatically:
+   
+   * Migrate the keystore from JCEKS to BCFKS format
+   * Create backups of existing files before migration
+   * Update password encoders to use FIPS-compliant algorithms
+
+4. **Unset FIPS_MODE** (optional, since OS-level FIPS will take precedence):
+
+   .. code-block:: bash
+   
+      unset FIPS_MODE
+
+5. **Re-enable OS-level FIPS and reboot** - GeoServer will now run in FIPS mode using the migrated configuration
+
+**Manual Migration (Alternative):**
+
+If you prefer manual control, you can update the security configuration directly:
+
+1. Edit ``<data-dir>/security/config.xml`` and change:
+   
+   .. code-block:: xml
+   
+      <configPasswordEncrypterName>pbePasswordEncoder</configPasswordEncrypterName>
+   
+   To:
+   
+   .. code-block:: xml
+   
+      <configPasswordEncrypterName>strongPbePasswordEncoder</configPasswordEncrypterName>
+
+2. Re-encrypt existing passwords by re-saving data store connections through the GeoServer web UI.
+
+3. Verify migration by checking that password fields use ``crypt2:`` prefix instead of ``crypt1:``.
+
+**Important Notes:**
+
+* New GeoServer data directories created in FIPS mode automatically use the strong password encoder
+* Attempting to use the weak password encoder in FIPS mode will result in a startup error
+* There is no automatic migration of ``crypt1:`` passwords - they must be re-entered 

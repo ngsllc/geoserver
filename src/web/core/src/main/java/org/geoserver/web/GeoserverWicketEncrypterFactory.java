@@ -104,17 +104,15 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
 
         StandardPBEByteEncryptor enc = new StandardPBEByteEncryptor();
         enc.setPasswordCharArray(key);
+        // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+        enc.setSaltGenerator(new org.geoserver.security.password.FipsRandomSaltGenerator());
+        enc.setIvGenerator(new org.geoserver.security.password.FipsRandomIvGenerator());
         // since the password is copied, we can scramble it
         manager.disposePassword(key);
 
-        if (manager.isStrongEncryptionAvailable()) {
-            // Prefer provider-agnostic FIPS-appropriate algorithm; provider will be resolved by JCE
-            enc.setAlgorithm("PBEWithHmacSHA256AndAES_128");
-        } else {
-            // US export restrictions: retain legacy weak algorithm for backward compatibility in non-FIPS
-            // In FIPS-enabled environments the strong path will be chosen
-            enc.setAlgorithm("PBEWITHMD5ANDDES");
-        }
+        // Always use FIPS-compatible algorithm - PBEWithHmacSHA256AndAES_128 works in both
+        // FIPS and non-FIPS modes. PBEWITHMD5ANDDES is blocked on FIPS-enabled systems.
+        enc.setAlgorithm("PBEWithHmacSHA256AndAES_128");
 
         result = new CryptImpl(enc);
         s.setAttribute(ICRYPT_ATTR_NAME, result);
