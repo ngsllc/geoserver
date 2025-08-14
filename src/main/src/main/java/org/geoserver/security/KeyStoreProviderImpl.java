@@ -10,12 +10,16 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.security.Key;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
 import java.security.NoSuchProviderException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.Security;
 import java.util.Enumeration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -42,7 +46,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     public static final String DEFAULT_BEAN_NAME = "DefaultKeyStoreProvider";
     public static final String FIPS_MODE_ENV_VAR = "FIPS_MODE";
-    public static final String DEFAULT_KEYSTORE_TYPE = "JCEKS";
+    public static final String JCEKS_KEYSTORE_TYPE = "JCEKS";
     public static final String BCFKS_KEYSTORE_TYPE = "BCFKS";
     public static final String PKCS12_KEYSTORE_TYPE = "PKCS12";
     public static final String BCFIPS_PROVIDER = "BCFIPS";
@@ -74,11 +78,30 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     /** Gets the keystore type based on FIPS mode: BCFKS for FIPS, JCEKS otherwise */
     public static String getKeyStoreType() {
-        return isFipsMode() ? BCFKS_KEYSTORE_TYPE : DEFAULT_KEYSTORE_TYPE;
+        // BCFKS is the BouncyCastle FIPS-compliant keystore
+        // JCEKS is not available in FIPS mode (uses non-FIPS DES/3DES)
+        // Note: BCFKS can store secret keys but only with FIPS-approved algorithms (e.g., AES)
+        if (isFipsMode()) {
+            return BCFKS_KEYSTORE_TYPE;
+        } else {
+            return JCEKS_KEYSTORE_TYPE;
+        }
     }
 
-    /** Detects if FIPS mode is enabled via FIPS_MODE environment variable */
+    /** Detects if FIPS mode is enabled. OS-level FIPS cannot be overridden. */
     public static boolean isFipsMode() {
+        // First check if OS-level FIPS is enabled - this cannot be overridden
+        if (isOsFipsEnabled()) {
+            // Log warning if user tried to disable FIPS on a FIPS system
+            String propValue = System.getProperty(FIPS_MODE_ENV_VAR);
+            String envValue = System.getenv(FIPS_MODE_ENV_VAR);
+            if ("false".equalsIgnoreCase(propValue) || "false".equalsIgnoreCase(envValue)) {
+                LOGGER.warning("FIPS_MODE=false ignored: OS-level FIPS is enabled and cannot be overridden");
+            }
+            return true;
+        }
+
+        // OS doesn't have FIPS, check if user wants to enable FIPS mode for testing
         // Check system property first to allow tests and runtime overrides
         String propValue = System.getProperty(FIPS_MODE_ENV_VAR);
         if (propValue != null && !propValue.trim().isEmpty()) {
@@ -89,6 +112,52 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         if (envValue != null && !envValue.trim().isEmpty()) {
             return "true".equalsIgnoreCase(envValue.trim());
         }
+        return false;
+    }
+
+    /**
+     * Checks if an algorithm name is FIPS-approved for secret key storage. BCFKS keystore rejects keys with non-FIPS
+     * algorithm names like PBEWithMD5AndDES.
+     */
+    private static boolean isFipsApprovedAlgorithm(String algorithm) {
+        if (algorithm == null) return false;
+        String upper = algorithm.toUpperCase();
+        // FIPS-approved symmetric algorithms
+        return upper.equals("AES")
+                || upper.startsWith("AES/")
+                || upper.equals("DESEDE")
+                || upper.equals("3DES")
+                || upper.equals("HMACSHA256")
+                || upper.equals("HMACSHA384")
+                || upper.equals("HMACSHA512")
+                || upper.startsWith("PBEWITHHMACSHA") && upper.contains("AES");
+    }
+
+    /**
+     * Detects if OS-level FIPS mode is enabled. Checks Linux /proc/sys/crypto/fips_enabled and Java security providers.
+     */
+    private static boolean isOsFipsEnabled() {
+        // Check Linux FIPS mode via /proc/sys/crypto/fips_enabled
+        try {
+            Path fipsFile = Paths.get("/proc/sys/crypto/fips_enabled");
+            if (Files.exists(fipsFile)) {
+                String content = Files.readString(fipsFile).trim();
+                if ("1".equals(content)) {
+                    return true;
+                }
+            }
+        } catch (Exception e) {
+            // Ignore - file may not exist on non-Linux systems
+        }
+
+        // Check for FIPS security providers (e.g., SunPKCS11-NSS-FIPS)
+        for (java.security.Provider provider : Security.getProviders()) {
+            String name = provider.getName();
+            if (name != null && (name.contains("FIPS") || name.contains("NSS-FIPS"))) {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -186,7 +255,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                                 providerClass.getDeclaredConstructor().newInstance();
                         java.security.Security.addProvider(bcProvider);
                         LOGGER.info("Successfully registered BouncyCastle FIPS provider");
-                        
+
                         // Validate that the provider supports required algorithms
                         validateProviderSupport(bcProvider);
                     } catch (ClassNotFoundException e) {
@@ -211,8 +280,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     }
 
     /**
-     * Validates that the provider supports required algorithms for FIPS operations.
-     * This ensures the provider is properly configured before attempting keystore operations.
+     * Validates that the provider supports required algorithms for FIPS operations. This ensures the provider is
+     * properly configured before attempting keystore operations.
      */
     private void validateProviderSupport(java.security.Provider provider) throws Exception {
         // Verify the provider supports BCFKS keystore type
@@ -224,7 +293,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             LOGGER.log(Level.SEVERE, "Provider does not support BCFKS keystore: " + e.getMessage(), e);
             throw new RuntimeException("Provider validation failed: BCFKS keystore not supported", e);
         }
-        
+
         // Verify the provider supports required algorithms
         try {
             java.security.MessageDigest.getInstance("SHA-256", provider);
@@ -252,26 +321,83 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      * <p>When copying to JCEKS, keys are normalized to SecretKeySpec to avoid Java serialization filter issues.
      */
     private void copyKeyEntries(KeyStore source, KeyStore target, char[] password) throws Exception {
-        boolean targetIsJceks = "JCEKS".equalsIgnoreCase(target.getType());
-
         java.util.Enumeration<String> aliases = source.aliases();
         while (aliases.hasMoreElements()) {
             String alias = aliases.nextElement();
             if (source.isKeyEntry(alias)) {
+                System.out.println("[KEYSTORE-MIGRATION] Processing key alias: '" + alias + "'");
+                LOGGER.log(Level.INFO, "Processing key alias: '" + alias + "'");
                 Key key = source.getKey(alias, password);
+                System.out.println("[KEYSTORE-MIGRATION] Retrieved key for '" + alias + "', class: "
+                        + key.getClass().getName());
+                LOGGER.log(
+                        Level.INFO,
+                        "Retrieved key for '" + alias + "', class: "
+                                + key.getClass().getName());
 
-                // When storing to JCEKS, convert SecretKey to SecretKeySpec to avoid
-                // serialization filter rejecting provider-specific key classes
-                if (targetIsJceks && key instanceof SecretKey && "RAW".equals(key.getFormat())) {
+                // Always normalize SecretKeys to SecretKeySpec for cross-keystore compatibility
+                // JCEKS needs this to avoid serialization filter issues
+                // BCFKS needs this because it can't store PBE-wrapped keys
+                if (key instanceof SecretKey) {
+                    System.out.println(
+                            "[KEYSTORE-MIGRATION] Key '" + alias + "' is SecretKey, attempting normalization");
+                    LOGGER.log(Level.INFO, "Key '" + alias + "' is SecretKey, attempting normalization");
+                    String originalClass = key.getClass().getName();
+                    String originalFormat = key.getFormat();
+                    System.out.println(
+                            "[KEYSTORE-MIGRATION] Original class: " + originalClass + ", format: " + originalFormat);
+                    LOGGER.log(Level.INFO, "Original class: " + originalClass + ", format: " + originalFormat);
+
                     byte[] encoded = key.getEncoded();
+                    System.out.println("[KEYSTORE-MIGRATION] getEncoded() result: "
+                            + (encoded == null ? "NULL" : encoded.length + " bytes"));
+                    LOGGER.log(
+                            Level.INFO,
+                            "getEncoded() for '" + alias + "': "
+                                    + (encoded == null ? "NULL" : encoded.length + " bytes"));
+
                     if (encoded != null) {
-                        key = new SecretKeySpec(encoded, key.getAlgorithm());
-                        LOGGER.log(Level.FINE, "Normalized key " + alias + " to SecretKeySpec for JCEKS compatibility");
+                        // For BCFKS in FIPS mode, we must use a FIPS-approved algorithm name
+                        // BCFKS rejects keys with PBE algorithm names like "PBEWithMD5AndDES"
+                        String targetAlgorithm = key.getAlgorithm();
+                        if ("BCFKS".equals(target.getType()) && !isFipsApprovedAlgorithm(targetAlgorithm)) {
+                            targetAlgorithm = DEFAULT_SECRET_KEY_ALGORITHM; // Use AES
+                            System.out.println("[KEYSTORE-MIGRATION] Changing algorithm from " + key.getAlgorithm()
+                                    + " to " + targetAlgorithm + " for BCFKS compatibility");
+                        }
+                        key = new SecretKeySpec(encoded, targetAlgorithm);
+                        System.out.println("[KEYSTORE-MIGRATION] Successfully normalized key '" + alias + "'");
+                        LOGGER.log(
+                                Level.INFO,
+                                "Normalized key '" + alias + "' from " + originalClass + " (format: " + originalFormat
+                                        + ") to SecretKeySpec with algorithm " + targetAlgorithm);
+                    } else {
+                        System.out.println(
+                                "[KEYSTORE-MIGRATION] ERROR: getEncoded() returned NULL for '" + alias + "'");
+                        LOGGER.log(
+                                Level.SEVERE,
+                                "Cannot normalize key '" + alias + "' - getEncoded() returned null. " + "Key class: "
+                                        + originalClass + ", format: " + originalFormat
+                                        + ". This key cannot be migrated to BCFKS.");
+                        throw new Exception("Cannot migrate key '" + alias + "' - key encoding is not available");
                     }
+                } else {
+                    System.out.println("[KEYSTORE-MIGRATION] Key '" + alias + "' is NOT SecretKey");
+                    LOGGER.log(
+                            Level.INFO,
+                            "Key '" + alias + "' is NOT SecretKey, type: "
+                                    + key.getClass().getName());
                 }
 
                 java.security.cert.Certificate[] chain = source.getCertificateChain(alias);
+                System.out.println("[KEYSTORE-MIGRATION] About to call setKeyEntry for '" + alias + "'");
+                LOGGER.log(Level.INFO, "About to call setKeyEntry for '" + alias + "'");
+
+                // Store the key in the target keystore
+                // For BCFKS, keys must have FIPS-approved algorithms (handled in normalization above)
                 target.setKeyEntry(alias, key, password, chain);
+
+                System.out.println("[KEYSTORE-MIGRATION] Successfully copied key '" + alias + "'");
                 LOGGER.log(Level.FINE, "Copied key during migration: " + alias);
             }
         }
@@ -345,7 +471,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             // 1. Prefer the file matching the current active mode
             if (BCFKS_KEYSTORE_TYPE.equals(cachedKeyStoreType) && legacyBcfks.getType() != Type.UNDEFINED) {
                 candidate = legacyBcfks;
-            } else if (DEFAULT_KEYSTORE_TYPE.equals(cachedKeyStoreType) && legacyJceks.getType() != Type.UNDEFINED) {
+            } else if (JCEKS_KEYSTORE_TYPE.equals(cachedKeyStoreType) && legacyJceks.getType() != Type.UNDEFINED) {
                 candidate = legacyJceks;
             }
 
@@ -532,6 +658,20 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                         "Keystore type mismatch (expected: " + keystoreType + ", found: " + effectiveType
                                 + "), migrating keystore from " + effectiveType + " to " + keystoreType);
 
+                // Check if we're trying to migrate from JCEKS when OS FIPS is enabled
+                if ("JCEKS".equals(effectiveType) && isOsFipsEnabled()) {
+                    throw new IOException("Cannot migrate JCEKS keystore when OS-level FIPS mode is enabled.\n\n"
+                            + "JCEKS keystores are not available in OS FIPS mode.\n\n"
+                            + "To migrate your keystore:\n"
+                            + "1. Disable OS FIPS mode temporarily: make disable && make reboot\n"
+                            + "2. Set FIPS_MODE=true environment variable in /etc/systemd/system/geoserver.service\n"
+                            + "3. Restart GeoServer - it will auto-migrate JCEKS → BCFKS\n"
+                            + "4. Remove FIPS_MODE variable from service file\n"
+                            + "5. Enable OS FIPS mode: make enable && make reboot\n"
+                            + "6. Start GeoServer - will use BCFKS in full FIPS mode\n\n"
+                            + "Alternative: Delete " + getResource().path() + " to start fresh with BCFKS.");
+                }
+
                 // Create backup before migration
                 Resource backupResource = null;
                 Resource oldResource = getResource();
@@ -539,10 +679,9 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     backupResource = securityManager.security().get(oldResource.name() + ".backup");
                     try {
                         java.nio.file.Files.copy(
-                            oldResource.file().toPath(),
-                            backupResource.file().toPath(),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
-                        );
+                                oldResource.file().toPath(),
+                                backupResource.file().toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                         LOGGER.log(Level.INFO, "Created backup: " + backupResource.name());
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING, "Failed to create backup before migration: " + e.getMessage(), e);
@@ -590,15 +729,14 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     LOGGER.log(Level.INFO, "Successfully wrote new keystore: " + newResource.name());
                 } catch (Exception e) {
                     LOGGER.log(Level.SEVERE, "Failed to write new keystore, attempting rollback: " + e.getMessage(), e);
-                    
+
                     // Rollback: restore from backup if available
                     if (backupResource != null && backupResource.getType() != Type.UNDEFINED) {
                         try {
                             java.nio.file.Files.copy(
-                                backupResource.file().toPath(),
-                                oldResource.file().toPath(),
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING
-                            );
+                                    backupResource.file().toPath(),
+                                    oldResource.file().toPath(),
+                                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                             LOGGER.log(Level.INFO, "Rollback successful: restored from backup");
                         } catch (Exception rollbackEx) {
                             LOGGER.log(Level.SEVERE, "Rollback failed: " + rollbackEx.getMessage(), rollbackEx);
@@ -607,24 +745,15 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     throw new IOException("Keystore migration failed", e);
                 }
 
-                // Delete the old keystore file after successful migration
+                // Keep old keystore file as backup for rollback (don't delete)
+                // The backup was already created above, so just log that it's preserved
                 if (!oldResource.path().equals(newResource.path()) && oldResource.getType() != Type.UNDEFINED) {
-                    try {
-                        oldResource.delete();
-                        LOGGER.log(Level.INFO, "Deleted old keystore file: " + oldResource.name());
-                    } catch (Exception e) {
-                        LOGGER.log(Level.WARNING, "Failed to delete old keystore file: " + oldResource.name(), e);
-                    }
+                    LOGGER.log(Level.INFO, "Old keystore preserved as backup: " + backupResource.name());
                 }
 
-                // Clean up backup after successful migration
+                // Keep backup for manual rollback - don't delete it
                 if (backupResource != null && backupResource.getType() != Type.UNDEFINED) {
-                    try {
-                        backupResource.delete();
-                        LOGGER.log(Level.INFO, "Deleted backup file after successful migration");
-                    } catch (Exception e) {
-                        LOGGER.log(Level.WARNING, "Failed to delete backup file: " + e.getMessage());
-                    }
+                    LOGGER.log(Level.INFO, "Backup file preserved for rollback: " + backupResource.name());
                 }
 
                 // Update the cached resource to point to the new file
