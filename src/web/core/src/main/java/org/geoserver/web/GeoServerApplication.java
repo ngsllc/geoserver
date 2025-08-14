@@ -317,6 +317,7 @@ public class GeoServerApplication extends WebApplication
         }
     }
 
+
     @Override
     public Supplier<IExceptionMapper> getExceptionMapperProvider() {
         return () -> new DefaultExceptionMapper() {

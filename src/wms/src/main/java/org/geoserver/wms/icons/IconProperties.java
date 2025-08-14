@@ -94,7 +94,7 @@ public abstract class IconProperties {
             @Override
             public String getIconName(Style style) {
                 try {
-                    final MessageDigest digest = MessageDigest.getInstance("MD5");
+                    final MessageDigest digest = MessageDigest.getInstance("SHA-256");
                     digest.update(style.getName().getBytes(StandardCharsets.UTF_8));
                     for (Map.Entry<String, String> property : styleProperties.entrySet()) {
                         digest.update(property.getKey().getBytes(StandardCharsets.UTF_8));
