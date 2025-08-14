@@ -20,7 +20,6 @@ import org.apache.wicket.request.cycle.RequestCycle;
 import org.apache.wicket.util.crypt.AbstractCrypt;
 import org.apache.wicket.util.crypt.ICrypt;
 import org.apache.wicket.util.crypt.ICryptFactory;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geotools.util.logging.Logging;
@@ -109,10 +108,11 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
         manager.disposePassword(key);
 
         if (manager.isStrongEncryptionAvailable()) {
-            enc.setProvider(new BouncyCastleProvider());
-            enc.setAlgorithm("PBEWITHSHA256AND128BITAES-CBC-BC");
+            // Prefer provider-agnostic FIPS-appropriate algorithm; provider will be resolved by JCE
+            enc.setAlgorithm("PBEWithHmacSHA256AndAES_128");
         } else {
-            // US export restrictions
+            // US export restrictions: retain legacy weak algorithm for backward compatibility in non-FIPS
+            // In FIPS-enabled environments the strong path will be chosen
             enc.setAlgorithm("PBEWITHMD5ANDDES");
         }
 

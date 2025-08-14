@@ -77,6 +77,16 @@ public class SecuritySettingsPage extends AbstractSecurityPage {
                         .add(new AttributeAppender("class", new Model<>("warning-link"), " ")));
             }
 
+            // Add FIPS mode indicator
+            boolean fipsMode = org.geoserver.security.KeyStoreProviderImpl.isFipsMode();
+            if (fipsMode) {
+                add(new Label("fipsModeMsg", new StringResourceModel("fipsEnabled", this, null))
+                        .add(new AttributeAppender("class", new Model<>("info-link"), " ")));
+            } else {
+                add(new Label("fipsModeMsg", new StringResourceModel("fipsDisabled", this, null))
+                        .add(new AttributeAppender("class", new Model<>("info-link"), " ")));
+            }
+
             add(new CheckBox("encryptingUrlParams"));
 
             // load only reversible encoders

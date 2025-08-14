@@ -40,9 +40,10 @@ public class GeoServerBasicAuthenticationFilter extends GeoServerCompositeFilter
         super.initializeFromConfig(config);
 
         try {
-            digest = MessageDigest.getInstance("MD5");
+            // Use SHA-256 for cache key hashing (non-cryptographic boundary, FIPS-friendly)
+            digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("No MD5 algorithm available!");
+            throw new IllegalStateException("No SHA-256 algorithm available!");
         }
 
         aep = new BasicAuthenticationEntryPoint();
@@ -80,7 +81,7 @@ public class GeoServerBasicAuthenticationFilter extends GeoServerCompositeFilter
         super.doFilter(req, res, chain);
     }
 
-    /** returns username:md5(password:filtername) */
+    /** returns username:hash(password:filtername) */
     @Override
     public String getCacheKey(HttpServletRequest request) {
 
