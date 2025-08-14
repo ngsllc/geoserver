@@ -1349,7 +1349,27 @@
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcprov-jdk18on</artifactId>
-        <version>1.79</version>
+        <version>1.82</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-jdk18on</artifactId>
+        <version>1.82</version>
+      </dependency>
+      <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
+      <!-- Note: bc-fips and bcpkix-fips are OPTIONAL dependencies that should only be used in FIPS mode -->
+      <!-- They conflict with regular BouncyCastle providers due to package sealing requirements -->
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bc-fips</artifactId>
+        <version>2.1.2</version>
+        <optional>true</optional>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-fips</artifactId>
+        <version>2.1.10</version>
+        <optional>true</optional>
       </dependency>
 
       <!-- wicket framework -->
