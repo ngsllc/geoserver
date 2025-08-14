@@ -74,5 +74,16 @@ command::
      mvn jetty:run 
      
 #. Use the browser to open:
-   
+
    http://localhost:8080/geoserver/
+
+FIPS Mode
+---------
+
+For FIPS 140-3 compliance, GeoServer includes built-in FIPS support. To run in FIPS mode:
+
+.. code-block:: bash
+
+   mvn jetty:run -DFIPS_MODE=true
+
+See the :ref:`FIPS documentation <security_fips_dev>` for complete FIPS configuration details.

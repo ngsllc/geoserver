@@ -10,6 +10,8 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 import static org.geoserver.security.SecurityUtils.toChars;
 
 import java.io.IOException;
+import java.security.Provider;
+import java.security.Security;
 import java.util.Arrays;
 import java.util.Base64;
 import org.geoserver.security.GeoServerSecurityManager;
@@ -80,14 +82,15 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     protected PasswordEncoder createStringEncoder() {
         byte[] password = lookupPasswordFromKeyStore();
 
-        char[] chars = toChars(password);
+        String passwordString = Base64.getEncoder().encodeToString(password);
+        char[] chars = passwordString.toCharArray();
         try {
             stringEncrypter = new StandardPBEStringEncryptor();
             stringEncrypter.setPasswordCharArray(chars);
 
-            if (getProviderName() != null && !getProviderName().isEmpty()) {
+            ensureProviderAvailableIfRequested();
+            if (getProviderName() != null && !getProviderName().isEmpty())
                 stringEncrypter.setProviderName(getProviderName());
-            }
             stringEncrypter.setAlgorithm(getAlgorithm());
 
             JasyptPBEPasswordEncoderWrapper encoder = new JasyptPBEPasswordEncoderWrapper();
@@ -103,14 +106,13 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     @Override
     protected CharArrayPasswordEncoder createCharEncoder() {
         byte[] password = lookupPasswordFromKeyStore();
-        char[] chars = toChars(password);
+        String passwordString = Base64.getEncoder().encodeToString(password);
+        char[] chars = passwordString.toCharArray();
 
         byteEncrypter = new StandardPBEByteEncryptor();
         byteEncrypter.setPasswordCharArray(chars);
-
-        if (getProviderName() != null && !getProviderName().isEmpty()) {
-            byteEncrypter.setProviderName(getProviderName());
-        }
+        ensureProviderAvailableIfRequested();
+        if (getProviderName() != null && !getProviderName().isEmpty()) byteEncrypter.setProviderName(getProviderName());
         byteEncrypter.setAlgorithm(getAlgorithm());
 
         return new CharArrayPasswordEncoder() {
@@ -138,6 +140,27 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
                 }
             }
         };
+    }
+
+    /**
+     * Ensures the requested JCE provider (e.g., "BCFIPS") is available; attempts lazy registration to preserve backward
+     * compatibility with configurations that specify a provider.
+     */
+    private void ensureProviderAvailableIfRequested() {
+        String requested = getProviderName();
+        if (requested == null || requested.isEmpty()) return;
+        Provider existing = Security.getProvider(requested);
+        if (existing != null) return;
+        try {
+            if ("BCFIPS".equals(requested)) {
+                Class<?> providerClass = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
+                Security.addProvider(
+                        (Provider) providerClass.getDeclaredConstructor().newInstance());
+            }
+            // Note: Regular BC provider is not shipped with GeoServer; only BC-FIPS is available
+        } catch (ReflectiveOperationException | SecurityException ignored) {
+            // If provider cannot be registered, jasypt will try default provider; acceptable fallback
+        }
     }
 
     byte[] lookupPasswordFromKeyStore() {
