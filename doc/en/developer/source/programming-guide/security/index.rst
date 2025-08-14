@@ -413,3 +413,8 @@ Example of **include** HTML can be::
     <input id="_spring_security_remember_me" type="checkbox" name="_spring_security_remember_me" />
     
 
+FIPS Development
+----------------
+
+For information about developing FIPS-compliant features in GeoServer, see :ref:`security_fips_dev`.
+

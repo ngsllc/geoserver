@@ -48,9 +48,11 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- UnboundID In-Memory LDAP Server - no BouncyCastle dependency, works with bc-fips -->
     <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-all</artifactId>
+      <groupId>com.unboundid</groupId>
+      <artifactId>unboundid-ldapsdk</artifactId>
+      <version>6.0.11</version>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -75,16 +77,7 @@
           </execution>
         </executions>
       </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <configuration>
-          <systemPropertyVariables>
-            <!-- Make ApacheDS work in the build directory, rather than using a fixed global position -->
-            <workingDirectory>${project.build.directory}/myDS</workingDirectory>
-          </systemPropertyVariables>
-        </configuration>
-      </plugin>
+
     </plugins>
   </build>
 </project>
