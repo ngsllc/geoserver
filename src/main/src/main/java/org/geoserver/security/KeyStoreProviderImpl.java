@@ -157,8 +157,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             try {
                 if (BCFIPS_PROVIDER.equals(provider)) {
                     // Try to load BouncyCastle FIPS provider
-                    // Note: This may fail if FIPS libraries are not in classpath or if regular BC provider is already
-                    // loaded
+                    // Note: This may fail if FIPS libraries are not in classpath or if regular BC provider is already loaded.
                     try {
                         Class<?> providerClass =
                                 Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
