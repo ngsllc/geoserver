@@ -227,7 +227,6 @@
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcpkix-jdk18on</artifactId>
-      <version>1.82</version>
     </dependency>
     <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
     <!-- Note: bc-fips and bcpkix-fips are OPTIONAL dependencies that should only be used in FIPS mode -->
