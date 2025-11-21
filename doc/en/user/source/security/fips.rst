@@ -23,8 +23,8 @@ GeoServer's keystore provider automatically:
 Configuration
 ------------
 
-Environment Variables
-~~~~~~~~~~~~~~~~~~~
+System Properties
+~~~~~~~~~~~~~~~~~~
 
 The following system properties can be used to configure FIPS behavior:
 
@@ -33,7 +33,7 @@ The following system properties can be used to configure FIPS behavior:
 * ``GEOSERVER_KEYSTORE_PROVIDER``: Specify the keystore provider
 
 Environment Variables
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 You can also set these as environment variables with the same names (converted to uppercase with underscores).
 

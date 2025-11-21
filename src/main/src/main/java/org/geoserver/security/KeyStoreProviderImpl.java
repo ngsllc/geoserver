@@ -33,8 +33,8 @@ import org.springframework.beans.factory.BeanNameAware;
  * <p><strong>requires a master password</strong> form {@link MasterPasswordProvider}
  *
  * <p>The type of the keystore can be configured via the GEOSERVER_KEYSTORE_TYPE environment variable. If not set,
- * defaults to JCEKS in non-FIPS mode and PKCS12 in FIPS mode. Supported types include JCEKS, BCFKS, and others supported by the JVM. The keystore can be
- * used/modified with java tools like "keytool" from the command line.
+ * defaults to JCEKS in non-FIPS mode and PKCS12 in FIPS mode. Supported types include JCEKS, BCFKS, and others
+ * supported by the JVM. The keystore can be used/modified with java tools like "keytool" from the command line.
  *
  * @author christian
  */
@@ -157,7 +157,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             try {
                 if (BCFIPS_PROVIDER.equals(provider)) {
                     // Try to load BouncyCastle FIPS provider
-                    // Note: This may fail if FIPS libraries are not in classpath or if regular BC provider is already loaded.
+                    // Note: This may fail if FIPS libraries are not in classpath or if regular BC provider is already
+                    // loaded.
                     try {
                         Class<?> providerClass =
                                 Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
