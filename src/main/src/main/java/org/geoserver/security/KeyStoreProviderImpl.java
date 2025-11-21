@@ -174,7 +174,9 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                         // Fallback to regular BC provider
                         fallbackToRegularBCProvider();
                     } catch (Exception e) {
-                        if (e.getCause() instanceof SecurityException
+                        if (e.getCause() != null
+                                && e.getCause() instanceof SecurityException
+                                && e.getCause().getMessage() != null
                                 && e.getCause().getMessage().contains("sealing violation")) {
                             LOGGER.log(
                                     Level.WARNING,
