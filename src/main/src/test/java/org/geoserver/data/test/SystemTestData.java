@@ -312,14 +312,8 @@ public class SystemTestData extends CiteTestData {
         String keystoreType = getCachedKeystoreType();
         String keystoreFileName = "geoserver." + keystoreType.toLowerCase();
 
-        // Copy appropriate keystore based on type and vendor
-        // This complex logic handles multiple scenarios:
-        // 1. Different keystore types (JCEKS, PKCS12, BCFKS) for different security requirements
-        // 2. IBM JVM vs other JVMs which may have different default keystore implementations
-        // 3. Fallback from new keystore format to legacy format for backward compatibility
-        // 4. Environment-specific keystores (IBM vs default) for testing different scenarios
+        // Copy appropriate keystore based on type and JVM vendor, with fallback to legacy formats
         if (System.getProperty("java.vendor").contains("IBM")) {
-            // For IBM JVM, try IBM-specific keystore first, then fallback to default
             // IBM JVMs often have different cryptographic provider behavior and keystore support
             File ibmKeystore = new File(secDir, keystoreFileName + ".ibm");
             File defaultKeystore = new File(secDir, keystoreFileName + ".default");
@@ -331,7 +325,6 @@ public class SystemTestData extends CiteTestData {
                 IOUtils.copy(defaultKeystore, targetKeystore);
             } else {
                 // Fallback to legacy BCFKS files if new format doesn't exist
-                // This ensures backward compatibility with older test data
                 File legacyIbm = new File(secDir, "geoserver.bcfks.ibm");
                 File legacyDefault = new File(secDir, "geoserver.bcfks.default");
                 if (legacyIbm.exists()) {
@@ -341,8 +334,7 @@ public class SystemTestData extends CiteTestData {
                 }
             }
         } else {
-            // For other JVMs (Oracle, OpenJDK, etc.), use default keystore
-            // These JVMs typically have consistent keystore behavior across vendors
+            // For non-IBM JVMs (Oracle, OpenJDK, etc.), use default keystore due to consistent keystore behavior
             File defaultKeystore = new File(secDir, keystoreFileName + ".default");
             File targetKeystore = new File(secDir, keystoreFileName);
 
@@ -350,7 +342,6 @@ public class SystemTestData extends CiteTestData {
                 IOUtils.copy(defaultKeystore, targetKeystore);
             } else {
                 // Fallback to legacy BCFKS file if new format doesn't exist
-                // Maintains compatibility with existing test environments
                 File legacyDefault = new File(secDir, "geoserver.bcfks.default");
                 if (legacyDefault.exists()) {
                     IOUtils.copy(legacyDefault, targetKeystore);

@@ -69,7 +69,13 @@ Non-reversible passwords provide the highest level of security, and therefore sh
 Secret keys and the keystore
 ----------------------------
 
-For a reversible password to provide a meaningful level of security, access to the password must be restricted in some way. In GeoServer, encrypting and decrypting passwords involves the generation of secret shared keys, stored in a typical Java *keystore*. GeoServer uses its own keystore for this purpose named ``geoserver.jceks`` which is located in the ``security`` directory in the GeoServer data directory. This file is stored in the `JCEKS format rather than the default JKS <http://www.itworld.com/nl/java_sec/07202001>`_. JKS does not support storing shared keys.
+For a reversible password to provide a meaningful level of security, access to the password must be restricted in some way.
+
+In GeoServer, encrypting and decrypting passwords involves the generation of secret shared keys, which are stored in a typical Java *keystore*.
+
+GeoServer uses its own keystore for this purpose named ``geoserver.jceks``, which is located in the ``security`` directory in the GeoServer data directory.
+
+This file is stored in the JCEKS format rather than the default JKS format. JKS does not support storing shared keys.
 
 .. note:: For FIPS-compliant environments, GeoServer provides a FIPS-compliant keystore provider. See :ref:`security_fips` for more information about FIPS compliance and keystore configuration.
 

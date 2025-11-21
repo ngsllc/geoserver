@@ -159,7 +159,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
                 Security.addProvider(
                         (Provider) providerClass.getDeclaredConstructor().newInstance());
             }
-        } catch (Throwable ignored) {
+        } catch (ReflectiveOperationException | SecurityException ignored) {
             // If provider cannot be registered, jasypt will try default provider; acceptable fallback
         }
     }
