@@ -79,7 +79,7 @@ This file is stored in the JCEKS format rather than the default JKS format. JKS 
 
 .. note:: For FIPS-compliant environments, GeoServer provides a FIPS-compliant keystore provider. See :ref:`security_fips` for more information about FIPS compliance and keystore configuration.
 
-The GeoServer keystore is password protected with a :ref:`security_master_passwd`. It is possible to access the contents of the keystore with external tools such as `keytool <http://docs.oracle.com/javase/6/docs/technotes/tools/solaris/keytool.html>`_. For example, this following command would prompt for the keystore password and list the contents of the keystore:
+The GeoServer keystore is password protected with a :ref:`security_master_passwd`. It is possible to access the contents of the keystore with external tools such as `keytool <https://docs.oracle.com/en/java/javase/17/docs/specs/man/keytool.html>`_. For example, this following command would prompt for the keystore password and list the contents of the keystore:
 
 .. code-block:: bash
 
