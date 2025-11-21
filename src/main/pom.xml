@@ -234,7 +234,6 @@
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bc-fips</artifactId>
-      <version>2.1.2</version>
       <optional>true</optional>
     </dependency>
     <dependency>
