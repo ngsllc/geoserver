@@ -324,7 +324,7 @@ public class SystemTestData extends CiteTestData {
             } else if (defaultKeystore.exists()) {
                 IOUtils.copy(defaultKeystore, targetKeystore);
             } else {
-                // Fallback to legacy BCFKS files if new format doesn't exist
+                // Fallback to BCFKS files if dynamically determined format doesn't exist
                 File legacyIbm = new File(secDir, "geoserver.bcfks.ibm");
                 File legacyDefault = new File(secDir, "geoserver.bcfks.default");
                 if (legacyIbm.exists()) {
