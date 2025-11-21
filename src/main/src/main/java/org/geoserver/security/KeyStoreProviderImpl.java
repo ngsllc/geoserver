@@ -33,7 +33,7 @@ import org.springframework.beans.factory.BeanNameAware;
  * <p><strong>requires a master password</strong> form {@link MasterPasswordProvider}
  *
  * <p>The type of the keystore can be configured via the GEOSERVER_KEYSTORE_TYPE environment variable. If not set,
- * defaults to JCEKS. Supported types include JCEKS, BCFKS, and others supported by the JVM. The keystore can be
+ * defaults to JCEKS in non-FIPS mode and PKCS12 in FIPS mode. Supported types include JCEKS, BCFKS, and others supported by the JVM. The keystore can be
  * used/modified with java tools like "keytool" from the command line.
  *
  * @author christian
