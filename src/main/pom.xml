@@ -229,17 +229,14 @@
       <artifactId>bcpkix-jdk18on</artifactId>
     </dependency>
     <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
-    <!-- Note: bc-fips and bcpkix-fips are OPTIONAL dependencies that should only be used in FIPS mode -->
-    <!-- They conflict with regular BouncyCastle providers due to package sealing requirements -->
+    <!-- Always included for universal FIPS compatibility -->
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bc-fips</artifactId>
-      <optional>true</optional>
     </dependency>
     <dependency>
       <groupId>org.bouncycastle</groupId>
       <artifactId>bcpkix-fips</artifactId>
-      <optional>true</optional>
     </dependency>
 
     <dependency>
@@ -310,27 +307,4 @@
     </plugins>
   </build>
 
-  <profiles>
-    <profile>
-      <id>fips</id>
-      <activation>
-        <property>
-          <name>fips</name>
-        </property>
-      </activation>
-      <dependencies>
-        <!-- Override FIPS dependencies to be non-optional when building FIPS-enabled main module -->
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bc-fips</artifactId>
-          <optional>false</optional>
-        </dependency>
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcpkix-fips</artifactId>
-          <optional>false</optional>
-        </dependency>
-      </dependencies>
-    </profile>
-  </profiles>
 </project>

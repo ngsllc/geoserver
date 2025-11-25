@@ -27,33 +27,23 @@ Implementation Details
 Building with FIPS Support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-GeoServer supports two build approaches for FIPS compatibility:
+GeoServer includes BC-FIPS support by default in all builds. No special profiles are needed.
 
-Universal Build (Recommended)
-"""""""""""""""""""""""""""""
-
+**Standard Build:**
 .. code-block:: bash
 
-   # Build universal distribution (works on both FIPS and non-FIPS)
-   mvn clean install -Puniversal
+   # BC-FIPS is included by default
+   mvn clean install
 
-This creates a distribution that includes both BC-FIPS and regular BouncyCastle libraries. The runtime detection system ensures only the appropriate provider is loaded, avoiding package sealing conflicts.
+**What's Included:**
+* BC-FIPS libraries (always included)
+* Regular BouncyCastle libraries (always included)
+* Runtime provider selection based on FIPS detection
 
-**Technical Details:**
-* BC-FIPS JARs are included as optional dependencies
-* Regular BouncyCastle JARs are included normally
-* ``KeyStoreProviderImpl.isFipsEnvironment()`` determines which provider to load
-* ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` conditionally registers providers
-
-FIPS-Only Build
-"""""""""""""""
-
-.. code-block:: bash
-
-   # Build FIPS-only distribution
-   mvn clean install -Pfips
-
-This creates a FIPS-optimized distribution that excludes regular BouncyCastle providers entirely, preventing any possibility of conflicts.
+**Technical Implementation:**
+* ``KeyStoreProviderImpl.isFipsEnvironment()`` detects FIPS mode via ``com.redhat.fips`` property
+* ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` loads appropriate provider
+* Package sealing prevents both providers from loading simultaneously
 
 Core Implementation
 ^^^^^^^^^^^^^^^^^^^

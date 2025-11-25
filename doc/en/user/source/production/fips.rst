@@ -65,47 +65,21 @@ If you need a dedicated FIPS-enabled image, create a custom Dockerfile:
 
 **Note**: The official GeoServer Docker image can be configured for FIPS mode using environment variables as shown above. A dedicated FIPS-enabled image may be provided in future releases.
 
-Building FIPS-Enabled GeoServer
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Building with FIPS Support
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-GeoServer supports two approaches for FIPS deployment:
-
-Universal Distribution (Recommended)
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-Build a single distribution that works on both FIPS and non-FIPS environments:
+GeoServer now includes BC-FIPS libraries by default in all builds, providing universal FIPS compatibility:
 
 .. code-block:: bash
 
-   # Build universal distribution
-   mvn clean install -Puniversal
+   # Standard build now includes FIPS support
+   mvn clean install
 
-   # Or use the build script
-   ./build-fips.sh universal
-
-**Benefits:**
-* ✅ Works on both FIPS and non-FIPS systems
-* ✅ No manual JAR management required
-* ✅ Runtime automatically detects environment
-* ✅ Single distribution for all deployments
-
-FIPS-Only Distribution
-^^^^^^^^^^^^^^^^^^^^^^
-
-Build a FIPS-only distribution optimized for FIPS environments:
-
-.. code-block:: bash
-
-   # Build FIPS-only distribution
-   mvn clean install -Pfips
-
-   # Or use the build script
-   ./build-fips.sh fips
-
-**Benefits:**
-* ✅ Smaller footprint (excludes regular BC)
-* ✅ Guaranteed FIPS compatibility
-* ✅ Prevents accidental mixing of providers
+**What's Included:**
+* ✅ BC-FIPS libraries (always included)
+* ✅ Regular BouncyCastle libraries (always included)
+* ✅ Runtime detection for appropriate provider selection
+* ✅ Single distribution works on both FIPS and non-FIPS systems
 
 Universal Distribution Details
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

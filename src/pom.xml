@@ -1689,6 +1689,26 @@
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>versions-maven-plugin</artifactId>
       </plugin>
+
+      <!-- Universal FIPS support: Copy BC-FIPS libs for runtime flexibility -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+        <executions>
+          <execution>
+            <id>copy-fips-libs</id>
+            <phase>prepare-package</phase>
+            <goals>
+              <goal>copy-dependencies</goal>
+            </goals>
+            <configuration>
+              <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
+              <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
+              <stripVersion>true</stripVersion>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
 
   </build>
@@ -2346,131 +2366,6 @@
           </plugin>
         </plugins>
       </build>
-    </profile>
-    <profile>
-      <id>fips</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-enforcer-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>enforce-fips-compatibility</id>
-                <goals>
-                  <goal>enforce</goal>
-                </goals>
-                <configuration>
-                  <rules>
-                    <requireProperty>
-                      <property>fips.enabled</property>
-                      <message>FIPS profile requires fips.enabled=true</message>
-                    </requireProperty>
-                  </rules>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-      <properties>
-        <fips.enabled>true</fips.enabled>
-      </properties>
-      <dependencies>
-        <!-- Include FIPS dependencies as non-optional when building FIPS-enabled GeoServer -->
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bc-fips</artifactId>
-          <optional>false</optional>
-        </dependency>
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcpkix-fips</artifactId>
-          <optional>false</optional>
-        </dependency>
-        <!-- Exclude regular BouncyCastle to prevent conflicts -->
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcprov-jdk18on</artifactId>
-          <scope>provided</scope>
-        </dependency>
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcpkix-jdk18on</artifactId>
-          <scope>provided</scope>
-        </dependency>
-      </dependencies>
-    </profile>
-
-    <profile>
-      <id>universal</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-dependency-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>copy-fips-libs</id>
-                <phase>prepare-package</phase>
-                <goals>
-                  <goal>copy-dependencies</goal>
-                </goals>
-                <configuration>
-                  <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
-                  <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
-                  <stripVersion>true</stripVersion>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-          <plugin>
-            <groupId>org.apache.maven.plugins</groupId>
-            <artifactId>maven-antrun-plugin</artifactId>
-            <executions>
-              <execution>
-                <id>create-universal-startup</id>
-                <phase>package</phase>
-                <goals>
-                  <goal>run</goal>
-                </goals>
-                <configuration>
-                  <target>
-                    <copy failonerror="false" file="${project.build.directory}/fips-libs/bc-fips.jar" todir="${project.build.directory}/universal-libs"></copy>
-                    <copy failonerror="false" file="${project.build.directory}/fips-libs/bcpkix-fips.jar" todir="${project.build.directory}/universal-libs"></copy>
-                  </target>
-                </configuration>
-              </execution>
-            </executions>
-          </plugin>
-        </plugins>
-      </build>
-      <properties>
-        <universal.enabled>true</universal.enabled>
-      </properties>
-      <dependencies>
-        <!-- Include both FIPS and regular BouncyCastle for universal compatibility -->
-        <!-- FIPS providers (optional - loaded conditionally at runtime) -->
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bc-fips</artifactId>
-          <optional>true</optional>
-        </dependency>
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcpkix-fips</artifactId>
-          <optional>true</optional>
-        </dependency>
-        <!-- Regular providers (always included for non-FIPS mode) -->
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcprov-jdk18on</artifactId>
-        </dependency>
-        <dependency>
-          <groupId>org.bouncycastle</groupId>
-          <artifactId>bcpkix-jdk18on</artifactId>
-        </dependency>
-      </dependencies>
     </profile>
   </profiles>
 
