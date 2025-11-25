@@ -110,8 +110,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
         byteEncrypter = new StandardPBEByteEncryptor();
         byteEncrypter.setPasswordCharArray(chars);
         ensureProviderAvailableIfRequested();
-        if (getProviderName() != null && !getProviderName().isEmpty())
-            byteEncrypter.setProviderName(getProviderName());
+        if (getProviderName() != null && !getProviderName().isEmpty()) byteEncrypter.setProviderName(getProviderName());
         byteEncrypter.setAlgorithm(getAlgorithm());
 
         return new CharArrayPasswordEncoder() {

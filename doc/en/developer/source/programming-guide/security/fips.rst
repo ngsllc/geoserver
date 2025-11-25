@@ -24,6 +24,40 @@ Key Features
 Implementation Details
 ~~~~~~~~~~~~~~~~~~~~~
 
+Building with FIPS Support
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+GeoServer supports two build approaches for FIPS compatibility:
+
+Universal Build (Recommended)
+"""""""""""""""""""""""""""""
+
+.. code-block:: bash
+
+   # Build universal distribution (works on both FIPS and non-FIPS)
+   mvn clean install -Puniversal
+
+This creates a distribution that includes both BC-FIPS and regular BouncyCastle libraries. The runtime detection system ensures only the appropriate provider is loaded, avoiding package sealing conflicts.
+
+**Technical Details:**
+* BC-FIPS JARs are included as optional dependencies
+* Regular BouncyCastle JARs are included normally
+* ``KeyStoreProviderImpl.isFipsEnvironment()`` determines which provider to load
+* ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` conditionally registers providers
+
+FIPS-Only Build
+"""""""""""""""
+
+.. code-block:: bash
+
+   # Build FIPS-only distribution
+   mvn clean install -Pfips
+
+This creates a FIPS-optimized distribution that excludes regular BouncyCastle providers entirely, preventing any possibility of conflicts.
+
+Core Implementation
+^^^^^^^^^^^^^^^^^^^
+
 The core keystore provider implements the following key methods:
 
 .. code-block:: java

@@ -246,19 +246,18 @@
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-collections4</artifactId>
     </dependency>
+
+    <!-- JSON processing -->
     <dependency>
-      <groupId>org.apache.commons</groupId>
-      <artifactId>commons-text</artifactId>
+      <groupId>org.codehaus.jettison</groupId>
+      <artifactId>jettison</artifactId>
     </dependency>
 
+    <!-- Test dependencies -->
     <dependency>
       <groupId>org.geotools.jdbc</groupId>
       <artifactId>gt-jdbc-h2</artifactId>
       <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.codehaus.jettison</groupId>
-      <artifactId>jettison</artifactId>
     </dependency>
     <dependency>
       <groupId>org.geotools</groupId>
@@ -310,4 +309,28 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <id>fips</id>
+      <activation>
+        <property>
+          <name>fips</name>
+        </property>
+      </activation>
+      <dependencies>
+        <!-- Override FIPS dependencies to be non-optional when building FIPS-enabled main module -->
+        <dependency>
+          <groupId>org.bouncycastle</groupId>
+          <artifactId>bc-fips</artifactId>
+          <optional>false</optional>
+        </dependency>
+        <dependency>
+          <groupId>org.bouncycastle</groupId>
+          <artifactId>bcpkix-fips</artifactId>
+          <optional>false</optional>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
 </project>

@@ -65,6 +65,83 @@ If you need a dedicated FIPS-enabled image, create a custom Dockerfile:
 
 **Note**: The official GeoServer Docker image can be configured for FIPS mode using environment variables as shown above. A dedicated FIPS-enabled image may be provided in future releases.
 
+Building FIPS-Enabled GeoServer
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GeoServer supports two approaches for FIPS deployment:
+
+Universal Distribution (Recommended)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Build a single distribution that works on both FIPS and non-FIPS environments:
+
+.. code-block:: bash
+
+   # Build universal distribution
+   mvn clean install -Puniversal
+
+   # Or use the build script
+   ./build-fips.sh universal
+
+**Benefits:**
+* ✅ Works on both FIPS and non-FIPS systems
+* ✅ No manual JAR management required
+* ✅ Runtime automatically detects environment
+* ✅ Single distribution for all deployments
+
+FIPS-Only Distribution
+^^^^^^^^^^^^^^^^^^^^^^
+
+Build a FIPS-only distribution optimized for FIPS environments:
+
+.. code-block:: bash
+
+   # Build FIPS-only distribution
+   mvn clean install -Pfips
+
+   # Or use the build script
+   ./build-fips.sh fips
+
+**Benefits:**
+* ✅ Smaller footprint (excludes regular BC)
+* ✅ Guaranteed FIPS compatibility
+* ✅ Prevents accidental mixing of providers
+
+Universal Distribution Details
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The universal distribution includes both BC-FIPS and regular BouncyCastle libraries. At runtime:
+
+* **FIPS Mode**: Loads BC-FIPS providers when ``com.redhat.fips=true``
+* **Non-FIPS Mode**: Uses regular BouncyCastle providers
+* **Automatic Detection**: No manual classpath configuration needed
+
+**How It Works:**
+
+1. **Package Sealing**: BC-FIPS and regular BC cannot be loaded simultaneously due to package sealing restrictions
+
+2. **Conditional Loading**: GeoServer's security framework only loads the appropriate provider:
+   - ``KeyStoreProviderImpl.isFipsEnvironment()`` detects FIPS mode
+   - ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` loads the correct provider
+
+3. **ClassLoader Isolation**: Even though both JARs are present, only one provider is registered in the JVM
+
+This approach leverages the existing conditional provider loading in GeoServer's security framework, ensuring compatibility across environments without manual configuration.
+
+**Testing Universal Distribution:**
+
+.. code-block:: bash
+
+   # Test FIPS mode
+   java -Dcom.redhat.fips=true -jar geoserver.war &
+   # Logs should show: "Successfully registered BouncyCastle FIPS provider"
+
+   # Test non-FIPS mode
+   java -jar geoserver.war &
+   # Logs should show: "Successfully registered standard BouncyCastle provider"
+
+Both modes work with the same distribution - no rebuild or JAR swapping required!
+
 **Dependency Conflicts**
 
 BouncyCastle FIPS providers cannot coexist with regular BouncyCastle providers in the same classpath due to package sealing requirements. If you encounter errors like:
