@@ -41,6 +41,24 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
 
     private KeyStoreProvider keystoreProvider;
 
+    public static boolean isBcAvailable() {
+        try {
+            Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
+    public static boolean isBcFipsAvailable() {
+        try {
+            Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
+            return true;
+        } catch (ClassNotFoundException e) {
+            return false;
+        }
+    }
+
     @Override
     public void initialize(GeoServerSecurityManager securityManager) throws IOException {
         this.keystoreProvider = securityManager.getKeyStoreProvider();

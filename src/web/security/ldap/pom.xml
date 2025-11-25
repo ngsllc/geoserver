@@ -55,6 +55,16 @@
       <groupId>org.apache.directory.server</groupId>
       <artifactId>apacheds-all</artifactId>
       <scope>test</scope>
+      <exclusions>
+        <exclusion>
+          <groupId>org.bouncycastle</groupId>
+          <artifactId>bcprov-jdk15on</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>org.bouncycastle</groupId>
+          <artifactId>bcprov-jdk18on</artifactId>
+        </exclusion>
+      </exclusions>
     </dependency>
     <!--
       bcprov-jdk15 must be before spring-ldap-test because the latter depends
@@ -65,7 +75,12 @@
     -->
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-jdk18on</artifactId>
+      <artifactId>bc-fips</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-fips</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
