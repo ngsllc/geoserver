@@ -609,30 +609,16 @@
         <artifactId>jasypt-springsecurity3</artifactId>
         <version>${jasypt.version}</version>
       </dependency>
-      <dependency>
-        <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-jdk18on</artifactId>
-        <version>1.82</version>
-      </dependency>
-      <dependency>
-        <groupId>org.bouncycastle</groupId>
-        <artifactId>bcpkix-jdk18on</artifactId>
-        <version>1.82</version>
-      </dependency>
       <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
-      <!-- Note: bc-fips and bcpkix-fips are OPTIONAL dependencies that should only be used in FIPS mode -->
-      <!-- They conflict with regular BouncyCastle providers due to package sealing requirements -->
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bc-fips</artifactId>
         <version>2.1.2</version>
-        <optional>true</optional>
       </dependency>
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bcpkix-fips</artifactId>
         <version>2.1.10</version>
-        <optional>true</optional>
       </dependency>
 
       <!-- wicket framework -->
@@ -869,8 +855,8 @@
             <groupId>commons-logging</groupId>
           </exclusion>
         </exclusions>
-        <!-- Needed to solve NamespaceHandler class org.apache.xbean.spring.context.v2.XBeanNamespaceHandler 
-             for namespace [http://activemq.apache.org/schema/core] not found ClassNotFoundException: 
+        <!-- Needed to solve NamespaceHandler class org.apache.xbean.spring.context.v2.XBeanNamespaceHandler
+             for namespace [http://activemq.apache.org/schema/core] not found ClassNotFoundException:
              org.apache.xbean.spring.context.v2.XBeanNamespaceHandler
         -->
       </dependency>
@@ -1328,7 +1314,7 @@
           <!-- Adding opens for build to work.
                Needed for mock frameworks: java.base/java.lang
                Additional needs for XStream:  java.base/java.util, java.base/java.lang.reflect, java.base/java.text, java.desktop/java.awt.font
-               Additional needs for JAI: java.desktop/sun.awt.image 
+               Additional needs for JAI: java.desktop/sun.awt.image
                Additional needs for LDAP tests:  java.naming/com.sun.jndi.ldap
             -->
           <argLine>@{argLine} -XX:+IgnoreUnrecognizedVMOptions -Dfile.encoding=UTF-8 --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED  --add-opens=java.desktop/sun.awt.image=ALL-UNNAMED --add-opens=java.naming/com.sun.jndi.ldap=ALL-UNNAMED</argLine>
