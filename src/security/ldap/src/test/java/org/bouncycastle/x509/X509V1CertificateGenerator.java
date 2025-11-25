@@ -6,23 +6,31 @@ import java.security.NoSuchAlgorithmException;
 import java.security.NoSuchProviderException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.Security;
 import java.security.SignatureException;
 import java.security.cert.CertificateEncodingException;
 import java.security.cert.X509Certificate;
 import java.util.Date;
 import org.bouncycastle.asn1.x500.X500Name;
-import org.bouncycastle.asn1.x509.X509Name;
+// import org.bouncycastle.asn1.x509.X509Name;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v1CertificateBuilder;
+import org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 
 public class X509V1CertificateGenerator {
+    static {
+        if (Security.getProvider("BCFIPS") == null) {
+            Security.addProvider(new BouncyCastleFipsProvider());
+        }
+    }
+
     private BigInteger serialNumber;
-    private X509Name issuerDN;
+    private X500Name issuerDN;
     private Date notBefore;
     private Date notAfter;
-    private X509Name subjectDN;
+    private X500Name subjectDN;
     private PublicKey publicKey;
     private String signatureAlgorithm;
 
@@ -42,13 +50,15 @@ public class X509V1CertificateGenerator {
         this.serialNumber = serialNumber;
     }
 
+    /*
     public void setIssuerDN(X509Name issuerDN) {
-        this.issuerDN = issuerDN;
+        this.issuerDN = X500Name.getInstance(issuerDN.toASN1Primitive());
     }
+    */
 
     public void setIssuerDN(javax.security.auth.x500.X500Principal issuer) {
         try {
-            this.issuerDN = new X509Name(org.bouncycastle.asn1.ASN1Sequence.getInstance(issuer.getEncoded()));
+            this.issuerDN = X500Name.getInstance(issuer.getEncoded());
         } catch (Exception e) {
             throw new IllegalArgumentException("Can't process X500Principal", e);
         }
@@ -62,13 +72,15 @@ public class X509V1CertificateGenerator {
         this.notAfter = date;
     }
 
+    /*
     public void setSubjectDN(X509Name subjectDN) {
-        this.subjectDN = subjectDN;
+        this.subjectDN = X500Name.getInstance(subjectDN.toASN1Primitive());
     }
+    */
 
     public void setSubjectDN(javax.security.auth.x500.X500Principal subject) {
         try {
-            this.subjectDN = new X509Name(org.bouncycastle.asn1.ASN1Sequence.getInstance(subject.getEncoded()));
+            this.subjectDN = X500Name.getInstance(subject.getEncoded());
         } catch (Exception e) {
             throw new IllegalArgumentException("Can't process X500Principal", e);
         }
@@ -85,18 +97,19 @@ public class X509V1CertificateGenerator {
     public X509Certificate generate(PrivateKey key)
             throws CertificateEncodingException, IllegalStateException, NoSuchProviderException,
                     NoSuchAlgorithmException, SignatureException, InvalidKeyException {
-        return generate(key, "BC");
+        return generate(key, "BCFIPS");
     }
 
     public X509Certificate generate(PrivateKey key, String provider)
             throws CertificateEncodingException, IllegalStateException, NoSuchProviderException,
                     NoSuchAlgorithmException, SignatureException, InvalidKeyException {
         try {
-            X500Name issuer = X500Name.getInstance(issuerDN.toASN1Primitive());
-            X500Name subject = X500Name.getInstance(subjectDN.toASN1Primitive());
-
+            // Force BCFIPS provider if BC is requested, as we are running with bc-fips
+            if ("BC".equals(provider)) {
+                provider = "BCFIPS";
+            }
             JcaX509v1CertificateBuilder builder =
-                    new JcaX509v1CertificateBuilder(issuer, serialNumber, notBefore, notAfter, subject, publicKey);
+                    new JcaX509v1CertificateBuilder(issuerDN, serialNumber, notBefore, notAfter, subjectDN, publicKey);
 
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm)
                     .setProvider(provider)
