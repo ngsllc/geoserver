@@ -20,6 +20,8 @@ Key Features
 * **Filename Inference**: Infers keystore type from extension
 * **Legacy Fallback**: Falls back to legacy keystore files when the configured one is missing
 * **Provider Fallback**: Registers/uses BouncyCastle providers for BCFKS when necessary
+* **Automatic Migration**: Migrates keystores between JCEKS and BCFKS formats with automatic backup/rollback
+* **Thread Safety**: Synchronized keystore operations prevent race conditions during concurrent access
 
 Implementation Details
 ~~~~~~~~~~~~~~~~~~~~~
@@ -101,10 +103,63 @@ Example: Creating a FIPS-Compliant Service
    KeyStoreProvider provider = securityManager.getKeyStoreProvider();
    String defaultType = KeyStoreProviderImpl.getKeyStoreType();
 
-Keystore migration (JCEKS → BCFKS)
+Keystore Migration and Safety
 -----------------------------------
 
-GeoServer automatically migrates keystores when switching to FIPS mode. For manual migration to BCFKS:
+Automatic Migration Process
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+GeoServer automatically migrates keystores when switching between FIPS and non-FIPS modes. The migration process includes:
+
+**Backup and Rollback:**
+
+* Before migration, creates a ``.backup`` file (e.g., ``geoserver.jceks.backup``)
+* If migration fails, automatically restores from backup
+* After successful migration, cleans up the backup file
+* Original keystore is deleted only after successful migration
+
+**Thread Safety:**
+
+The following methods are synchronized to prevent race conditions:
+
+* ``reloadKeyStore()`` - Prevents concurrent reload attempts
+* ``assertActivatedKeyStore()`` - Ensures single-threaded migration
+* ``storeKeyStore()`` - Prevents concurrent writes
+
+This synchronization ensures that:
+
+* Multiple threads can safely access the keystore provider
+* Only one migration occurs at a time
+* No data corruption from concurrent operations
+
+**Provider Validation:**
+
+When registering the BouncyCastle FIPS provider, the system validates:
+
+* BCFKS keystore type is supported
+* Required algorithms (SHA-256) are available
+* Provider is properly initialized before use
+
+**Example Migration Flow:**
+
+.. code-block:: text
+
+   1. Detect keystore type mismatch (JCEKS found, BCFKS expected)
+   2. Create geoserver.jceks.backup
+   3. Load old JCEKS keystore
+   4. Create new BCFKS keystore
+   5. Copy all keys (normalized for compatibility)
+   6. Write new geoserver.bcfks
+   7. Delete old geoserver.jceks
+   8. Clean up geoserver.jceks.backup
+   9. Update resource cache to point to new file
+
+If step 6 fails, the backup is automatically restored.
+
+Manual Migration (Optional)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+For manual migration to BCFKS:
 
 .. code-block:: bash
 

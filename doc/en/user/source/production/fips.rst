@@ -138,7 +138,14 @@ When you set ``FIPS_MODE=true``, GeoServer will:
 
 1. Look for ``geoserver.bcfks``
 2. If not found, look for ``geoserver.jceks`` (legacy)
-3. If legacy found with wrong type, automatically recreate as BCFKS
+3. If legacy found with wrong type, automatically migrate to BCFKS:
+   
+   * Creates a backup file (``.backup``) before migration
+   * Migrates all keys to new format
+   * If migration fails, automatically restores from backup
+   * Cleans up backup after successful migration
+   * Thread-safe to prevent concurrent migration conflicts
+
 4. If nothing found, create new ``geoserver.bcfks``
 
 **Manual Migration (Optional):**
@@ -169,7 +176,12 @@ If you prefer to manually convert an existing keystore:
    keytool -list -keystore /path/to/data/security/geoserver.bcfks \
      -storetype BCFKS -storepass "$MASTER"
 
-**Note**: GeoServer's automatic migration handles type detection and recreation transparently.
+**Note**: GeoServer's automatic migration handles type detection and recreation transparently. The migration process:
+
+* Creates automatic backups before migration
+* Provides rollback capability if migration fails  
+* Is thread-safe for concurrent server operations
+* Preserves all existing keys and certificates
 
 Verifying FIPS Mode
 ------------------

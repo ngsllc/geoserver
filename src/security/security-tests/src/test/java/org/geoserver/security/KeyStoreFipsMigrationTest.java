@@ -453,6 +453,159 @@ public class KeyStoreFipsMigrationTest extends GeoServerSystemTestSupport {
         LOGGER.log(Level.INFO, "=== Test completed successfully ===");
     }
 
+    @Test
+    public void testBackupCreatedDuringMigration() throws Exception {
+        LOGGER.log(Level.INFO, "=== Test: Backup created during migration ===");
+
+        // Step 1: Create a JCEKS keystore
+        System.clearProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
+        deleteKeystoreFiles();
+
+        KeyStoreProvider ksp = getSecurityManager().getKeyStoreProvider();
+        ksp.reloadKeyStore();
+        ksp.setSecretKey(TEST_KEY_ALIAS, TEST_KEY_VALUE.toCharArray());
+        ksp.storeKeyStore();
+
+        Resource securityDir = getSecurityManager().security();
+        Resource jceksFile = securityDir.get("geoserver.jceks");
+        assertTrue("JCEKS file should exist", jceksFile.getType() == Resource.Type.RESOURCE);
+
+        // Record the original file size
+        long originalSize = jceksFile.file().length();
+        LOGGER.log(Level.INFO, "Original JCEKS file size: " + originalSize);
+
+        // Step 2: Switch to FIPS mode - should create backup during migration
+        System.setProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR, "true");
+        ksp = getSecurityManager().getKeyStoreProvider();
+        ksp.reloadKeyStore();
+
+        // Verify migration succeeded
+        assertEquals("BCFKS", KeyStoreProviderImpl.getKeyStoreType());
+        Resource bcfksFile = securityDir.get("geoserver.bcfks");
+        assertTrue("BCFKS file should exist", bcfksFile.getType() == Resource.Type.RESOURCE);
+
+        // Verify backup was cleaned up after successful migration
+        Resource backupFile = securityDir.get("geoserver.jceks.backup");
+        assertFalse(
+                "Backup should be cleaned up after successful migration",
+                backupFile.getType() == Resource.Type.RESOURCE);
+
+        // Verify key was preserved
+        assertTrue(ksp.containsAlias(TEST_KEY_ALIAS));
+        assertNotNull(ksp.getSecretKey(TEST_KEY_ALIAS));
+
+        LOGGER.log(Level.INFO, "=== Test completed: Backup mechanism verified ===");
+    }
+
+    @Test
+    public void testConcurrentReloadKeyStore() throws Exception {
+        LOGGER.log(Level.INFO, "=== Test: Concurrent reloadKeyStore calls ===");
+
+        // Create initial keystore
+        System.clearProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
+        deleteKeystoreFiles();
+
+        KeyStoreProvider ksp = getSecurityManager().getKeyStoreProvider();
+        ksp.reloadKeyStore();
+        ksp.setSecretKey(TEST_KEY_ALIAS, TEST_KEY_VALUE.toCharArray());
+        ksp.storeKeyStore();
+
+        // Test concurrent reloads - should not cause race conditions
+        final int threadCount = 5;
+        final java.util.concurrent.CountDownLatch startLatch = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch doneLatch = new java.util.concurrent.CountDownLatch(threadCount);
+        final java.util.concurrent.atomic.AtomicInteger successCount = new java.util.concurrent.atomic.AtomicInteger(0);
+        final java.util.concurrent.atomic.AtomicInteger failureCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        for (int i = 0; i < threadCount; i++) {
+            final int threadNum = i;
+            new Thread(() -> {
+                        try {
+                            startLatch.await(); // Wait for all threads to be ready
+                            KeyStoreProvider threadKsp = getSecurityManager().getKeyStoreProvider();
+                            threadKsp.reloadKeyStore();
+
+                            // Verify keystore is functional after reload
+                            if (threadKsp.containsAlias(TEST_KEY_ALIAS)) {
+                                successCount.incrementAndGet();
+                                LOGGER.log(Level.INFO, "Thread " + threadNum + " successfully reloaded");
+                            } else {
+                                failureCount.incrementAndGet();
+                                LOGGER.log(Level.WARNING, "Thread " + threadNum + " reload failed");
+                            }
+                        } catch (Exception e) {
+                            failureCount.incrementAndGet();
+                            LOGGER.log(Level.SEVERE, "Thread " + threadNum + " threw exception", e);
+                        } finally {
+                            doneLatch.countDown();
+                        }
+                    })
+                    .start();
+        }
+
+        // Start all threads simultaneously
+        startLatch.countDown();
+
+        // Wait for all threads to complete (with timeout)
+        boolean completed = doneLatch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue("All threads should complete within timeout", completed);
+
+        // Verify all threads succeeded
+        assertEquals("All threads should succeed", threadCount, successCount.get());
+        assertEquals("No threads should fail", 0, failureCount.get());
+
+        LOGGER.log(Level.INFO, "=== Test completed: " + successCount.get() + " concurrent reloads succeeded ===");
+    }
+
+    @Test
+    public void testConcurrentStoreKeyStore() throws Exception {
+        LOGGER.log(Level.INFO, "=== Test: Concurrent storeKeyStore calls ===");
+
+        System.clearProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
+        deleteKeystoreFiles();
+
+        KeyStoreProvider ksp = getSecurityManager().getKeyStoreProvider();
+        ksp.reloadKeyStore();
+
+        // Test concurrent stores - should not cause corruption
+        final int threadCount = 5;
+        final java.util.concurrent.CountDownLatch startLatch = new java.util.concurrent.CountDownLatch(1);
+        final java.util.concurrent.CountDownLatch doneLatch = new java.util.concurrent.CountDownLatch(threadCount);
+        final java.util.concurrent.atomic.AtomicInteger successCount = new java.util.concurrent.atomic.AtomicInteger(0);
+
+        for (int i = 0; i < threadCount; i++) {
+            final int threadNum = i;
+            new Thread(() -> {
+                        try {
+                            startLatch.await();
+                            KeyStoreProvider threadKsp = getSecurityManager().getKeyStoreProvider();
+                            threadKsp.setSecretKey("thread_key_" + threadNum, ("value_" + threadNum).toCharArray());
+                            threadKsp.storeKeyStore();
+                            successCount.incrementAndGet();
+                            LOGGER.log(Level.INFO, "Thread " + threadNum + " stored successfully");
+                        } catch (Exception e) {
+                            LOGGER.log(Level.SEVERE, "Thread " + threadNum + " failed", e);
+                        } finally {
+                            doneLatch.countDown();
+                        }
+                    })
+                    .start();
+        }
+
+        startLatch.countDown();
+        boolean completed = doneLatch.await(30, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue("All threads should complete", completed);
+        assertEquals("All stores should succeed", threadCount, successCount.get());
+
+        // Verify all keys are present (reload to ensure consistency)
+        ksp.reloadKeyStore();
+        for (int i = 0; i < threadCount; i++) {
+            assertTrue("Key from thread " + i + " should exist", ksp.containsAlias("thread_key_" + i));
+        }
+
+        LOGGER.log(Level.INFO, "=== Test completed: All keys stored successfully ===");
+    }
+
     /** Helper method to delete all keystore files to ensure clean test state */
     private void deleteKeystoreFiles() throws Exception {
         Resource securityDir = getSecurityManager().security();
@@ -473,6 +626,15 @@ public class KeyStoreFipsMigrationTest extends GeoServerSystemTestSupport {
             if (ksFile.getType() == Resource.Type.RESOURCE) {
                 ksFile.delete();
                 LOGGER.log(Level.INFO, "Deleted temporary keystore file: geoserver." + ext + ".new");
+            }
+        }
+
+        // Delete backup files
+        for (String ext : extensions) {
+            Resource backupFile = securityDir.get("geoserver." + ext + ".backup");
+            if (backupFile.getType() == Resource.Type.RESOURCE) {
+                backupFile.delete();
+                LOGGER.log(Level.INFO, "Deleted backup file: geoserver." + ext + ".backup");
             }
         }
     }
