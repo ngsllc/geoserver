@@ -39,6 +39,8 @@ public class KeyStoreFipsMigrationTest extends GeoServerSystemTestSupport {
     public void saveOriginalFipsMode() {
         originalFipsMode = System.getProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
         LOGGER.log(Level.INFO, "Saved original FIPS mode: " + originalFipsMode);
+        // Clear the static cache in SystemTestData to ensure tests see the correct keystore type
+        org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
     }
 
     @After
@@ -48,6 +50,8 @@ public class KeyStoreFipsMigrationTest extends GeoServerSystemTestSupport {
         } else {
             System.clearProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
         }
+        // Clear the static cache in SystemTestData to ensure next test sees the correct keystore type
+        org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
         // Force reload to ensure clean state for next test
         getSecurityManager().getKeyStoreProvider().reloadKeyStore();
         LOGGER.log(Level.INFO, "Restored original FIPS mode: " + originalFipsMode);

@@ -79,15 +79,15 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     /** Detects if FIPS mode is enabled via FIPS_MODE environment variable */
     public static boolean isFipsMode() {
-        // Check environment variable first
-        String envValue = System.getenv(FIPS_MODE_ENV_VAR);
-        if (envValue != null && !envValue.trim().isEmpty()) {
-            return "true".equalsIgnoreCase(envValue.trim());
-        }
-        // Check system property as fallback
+        // Check system property first to allow tests and runtime overrides
         String propValue = System.getProperty(FIPS_MODE_ENV_VAR);
         if (propValue != null && !propValue.trim().isEmpty()) {
             return "true".equalsIgnoreCase(propValue.trim());
+        }
+        // Check environment variable as fallback
+        String envValue = System.getenv(FIPS_MODE_ENV_VAR);
+        if (envValue != null && !envValue.trim().isEmpty()) {
+            return "true".equalsIgnoreCase(envValue.trim());
         }
         return false;
     }

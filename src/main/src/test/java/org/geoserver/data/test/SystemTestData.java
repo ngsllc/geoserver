@@ -99,6 +99,14 @@ public class SystemTestData extends CiteTestData {
         return cachedKeystoreType;
     }
 
+    /**
+     * Resets the cached keystore type. This should be called when FIPS mode changes during tests to ensure the cache is
+     * invalidated and re-evaluated.
+     */
+    public static void resetCachedKeystoreType() {
+        cachedKeystoreType = null;
+    }
+
     /** Keys for overriding default layer properties */
     public static class LayerProperty<T> {
 
