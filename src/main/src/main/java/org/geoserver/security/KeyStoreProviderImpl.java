@@ -186,6 +186,9 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                                 providerClass.getDeclaredConstructor().newInstance();
                         java.security.Security.addProvider(bcProvider);
                         LOGGER.info("Successfully registered BouncyCastle FIPS provider");
+                        
+                        // Validate that the provider supports required algorithms
+                        validateProviderSupport(bcProvider);
                     } catch (ClassNotFoundException e) {
                         LOGGER.log(
                                 Level.SEVERE,
@@ -204,6 +207,30 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle provider: " + e.getMessage(), e);
                 throw new RuntimeException("Failed to register BouncyCastle provider", e);
             }
+        }
+    }
+
+    /**
+     * Validates that the provider supports required algorithms for FIPS operations.
+     * This ensures the provider is properly configured before attempting keystore operations.
+     */
+    private void validateProviderSupport(java.security.Provider provider) throws Exception {
+        // Verify the provider supports BCFKS keystore type
+        try {
+            KeyStore testKs = KeyStore.getInstance(BCFKS_KEYSTORE_TYPE, provider);
+            testKs.load(null, null);
+            LOGGER.log(Level.FINE, "Provider " + provider.getName() + " successfully supports BCFKS keystore");
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Provider does not support BCFKS keystore: " + e.getMessage(), e);
+            throw new RuntimeException("Provider validation failed: BCFKS keystore not supported", e);
+        }
+        
+        // Verify the provider supports required algorithms
+        try {
+            java.security.MessageDigest.getInstance("SHA-256", provider);
+            LOGGER.log(Level.FINE, "Provider " + provider.getName() + " supports SHA-256");
+        } catch (Exception e) {
+            LOGGER.log(Level.WARNING, "Provider may not support SHA-256: " + e.getMessage());
         }
     }
 
@@ -347,7 +374,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      * @see org.geoserver.security.password.KeystoreProvider#reloadKeyStore()
      */
     @Override
-    public void reloadKeyStore() throws IOException {
+    public synchronized void reloadKeyStore() throws IOException {
         ks = null;
         keyStoreResource = null; // Clear cached resource to allow re-evaluation
         cachedKeyStoreType = getKeyStoreType(); // Re-evaluate FIPS mode
@@ -470,7 +497,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      *
      * <p>Throws an exception for an invalid master key
      */
-    protected void assertActivatedKeyStore() throws IOException {
+    protected synchronized void assertActivatedKeyStore() throws IOException {
         if (ks != null) return;
 
         char[] passwd = securityManager.getMasterPassword();
@@ -505,6 +532,25 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                         "Keystore type mismatch (expected: " + keystoreType + ", found: " + effectiveType
                                 + "), migrating keystore from " + effectiveType + " to " + keystoreType);
 
+                // Create backup before migration
+                Resource backupResource = null;
+                Resource oldResource = getResource();
+                if (oldResource.getType() != Type.UNDEFINED) {
+                    backupResource = securityManager.security().get(oldResource.name() + ".backup");
+                    try {
+                        java.nio.file.Files.copy(
+                            oldResource.file().toPath(),
+                            backupResource.file().toPath(),
+                            java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                        );
+                        LOGGER.log(Level.INFO, "Created backup: " + backupResource.name());
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Failed to create backup before migration: " + e.getMessage(), e);
+                        // Continue without backup
+                        backupResource = null;
+                    }
+                }
+
                 // Load the old keystore with its correct provider
                 KeyStore oldKs = createKeyStore(effectiveType, getKeyStoreProviderForType(effectiveType));
                 LOGGER.log(
@@ -537,18 +583,47 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
                 // Save the new keystore to the correct filename for the new type
                 Resource newResource = securityManager.security().get(getDefaultFileName());
-                try (OutputStream fos = newResource.out()) {
-                    ks.store(fos, passwd);
+                try {
+                    try (OutputStream fos = newResource.out()) {
+                        ks.store(fos, passwd);
+                    }
+                    LOGGER.log(Level.INFO, "Successfully wrote new keystore: " + newResource.name());
+                } catch (Exception e) {
+                    LOGGER.log(Level.SEVERE, "Failed to write new keystore, attempting rollback: " + e.getMessage(), e);
+                    
+                    // Rollback: restore from backup if available
+                    if (backupResource != null && backupResource.getType() != Type.UNDEFINED) {
+                        try {
+                            java.nio.file.Files.copy(
+                                backupResource.file().toPath(),
+                                oldResource.file().toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING
+                            );
+                            LOGGER.log(Level.INFO, "Rollback successful: restored from backup");
+                        } catch (Exception rollbackEx) {
+                            LOGGER.log(Level.SEVERE, "Rollback failed: " + rollbackEx.getMessage(), rollbackEx);
+                        }
+                    }
+                    throw new IOException("Keystore migration failed", e);
                 }
 
                 // Delete the old keystore file after successful migration
-                Resource oldResource = getResource();
                 if (!oldResource.path().equals(newResource.path()) && oldResource.getType() != Type.UNDEFINED) {
                     try {
                         oldResource.delete();
                         LOGGER.log(Level.INFO, "Deleted old keystore file: " + oldResource.name());
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING, "Failed to delete old keystore file: " + oldResource.name(), e);
+                    }
+                }
+
+                // Clean up backup after successful migration
+                if (backupResource != null && backupResource.getType() != Type.UNDEFINED) {
+                    try {
+                        backupResource.delete();
+                        LOGGER.log(Level.INFO, "Deleted backup file after successful migration");
+                    } catch (Exception e) {
+                        LOGGER.log(Level.WARNING, "Failed to delete backup file: " + e.getMessage());
                     }
                 }
 
@@ -667,7 +742,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      * @see org.geoserver.security.password.KeystoreProvider#storeKeyStore()
      */
     @Override
-    public void storeKeyStore() throws IOException {
+    public synchronized void storeKeyStore() throws IOException {
         // store away the keystore
         assertActivatedKeyStore();
         try (OutputStream fos = getResource().out()) {

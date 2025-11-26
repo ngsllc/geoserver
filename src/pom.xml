@@ -610,6 +610,7 @@
         <version>${jasypt.version}</version>
       </dependency>
       <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
+      <!-- Note: bc-fips 2.1.2 is compatible with bcpkix-fips 2.1.x versions -->
       <dependency>
         <groupId>org.bouncycastle</groupId>
         <artifactId>bc-fips</artifactId>
