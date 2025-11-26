@@ -15,9 +15,6 @@ import org.geoserver.catalog.Catalog;
 import org.geoserver.platform.ExtensionPriority;
 import org.geoserver.rest.util.RESTUploadPathMapperImpl;
 import org.geoserver.rest.util.RESTUtils;
-import org.geotools.api.feature.simple.SimpleFeature;
-import org.geotools.api.feature.simple.SimpleFeatureType;
-import org.geotools.api.filter.expression.Expression;
 import org.geotools.data.DataUtilities;
 import org.geotools.feature.SchemaException;
 import org.geotools.feature.simple.SimpleFeatureBuilder;
@@ -25,15 +22,21 @@ import org.geotools.filter.FilterAttributeExtractor;
 import org.geotools.filter.text.cql2.CQLException;
 import org.geotools.filter.text.ecql.ECQL;
 import org.geotools.util.logging.Logging;
+import org.geotools.api.feature.simple.SimpleFeature;
+import org.geotools.api.feature.simple.SimpleFeatureType;
+import org.geotools.api.filter.expression.Expression;
 
 /**
- * RESTUploadPathMapper implementation which executes a CQL expression on the input file name for remapping it
+ * RESTUploadPathMapper implementation which executes a CQL expression on the input file name for
+ * remapping it
  *
  * @author Nicola Lagomarsini Geosolutions S.A.S.
  */
-public class RESTUploadECQLPathMapper extends RESTUploadPathMapperImpl implements ExtensionPriority {
+public class RESTUploadECQLPathMapper extends RESTUploadPathMapperImpl
+        implements ExtensionPriority {
 
-    private static Logger LOGGER = Logging.getLogger("org.geoserver.rest.cql.RESTUploadCQLPathMapper");
+    private static Logger LOGGER =
+            Logging.getLogger("org.geoserver.rest.cql.RESTUploadCQLPathMapper");
 
     /** MetadataMap key associated to the expression value */
     public static final String EXPRESSION_KEY = "expression";
@@ -73,7 +76,11 @@ public class RESTUploadECQLPathMapper extends RESTUploadPathMapperImpl implement
     }
 
     public void mapItemPath(
-            String workspace, String store, Map<String, String> storeParams, StringBuilder itemPath, String itemName)
+            String workspace,
+            String store,
+            Map<String, String> storeParams,
+            StringBuilder itemPath,
+            String itemName)
             throws IOException {
 
         // expression to use for remapping
@@ -100,15 +107,21 @@ public class RESTUploadECQLPathMapper extends RESTUploadPathMapperImpl implement
         if (attributes != null) {
             if (attributes.contains(PATH)) {
                 if (attributes.contains(NAME)) {
-                    feature = SimpleFeatureBuilder.build(typeAll, new Object[] {itemPath.toString(), itemName}, null);
+                    feature =
+                            SimpleFeatureBuilder.build(
+                                    typeAll, new Object[] {itemPath.toString(), itemName}, null);
                 } else {
-                    feature = SimpleFeatureBuilder.build(typePath, new Object[] {itemPath.toString()}, null);
+                    feature =
+                            SimpleFeatureBuilder.build(
+                                    typePath, new Object[] {itemPath.toString()}, null);
                 }
             } else if (attributes.contains(NAME)) {
                 feature = SimpleFeatureBuilder.build(typeName, new Object[] {itemName}, null);
             }
         } else {
-            feature = SimpleFeatureBuilder.build(typeAll, new Object[] {itemPath.toString(), itemName}, null);
+            feature =
+                    SimpleFeatureBuilder.build(
+                            typeAll, new Object[] {itemPath.toString(), itemName}, null);
         }
 
         if (feature == null) {

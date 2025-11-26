@@ -12,7 +12,8 @@ import java.util.logging.Logger;
 import org.geotools.util.logging.Logging;
 
 /**
- * Class used for cleaning the resources in the temporary directory after that the "expirationDelay" has passed
+ * Class used for cleaning the resources in the temporary directory after that the "expirationDelay"
+ * has passed
  *
  * @author Nicola Lagomarsini
  */
@@ -26,7 +27,8 @@ public class ResumableUploadResourceCleaner extends TimerTask {
     /** Manager handling all the REST upload operations */
     private ResumableUploadResourceManager resourceManager;
 
-    public ResumableUploadResourceCleaner(ResumableUploadResourceManager resourceManager, Long expirationDelay)
+    public ResumableUploadResourceCleaner(
+            ResumableUploadResourceManager resourceManager, Long expirationDelay)
             throws IOException {
         this.resourceManager = resourceManager;
         this.expirationDelay = expirationDelay;
@@ -43,12 +45,15 @@ public class ResumableUploadResourceCleaner extends TimerTask {
             resourceManager.cleanExpiredResources(expirationThreshold);
         } catch (Exception e) {
             LOGGER.log(
-                    Level.WARNING, "Error occurred while trying to clean up " + "old coverages from temp storage", e);
+                    Level.WARNING,
+                    "Error occurred while trying to clean up " + "old coverages from temp storage",
+                    e);
         }
     }
 
     /**
-     * The file expiration delay in milliseconds. A file will be deleted when it's been around more than expirationDelay
+     * The file expiration delay in milliseconds. A file will be deleted when it's been around more
+     * than expirationDelay
      */
     public long getExpirationDelay() {
         return expirationDelay;

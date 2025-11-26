@@ -153,7 +153,8 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         request.addHeader("Content-type", "application/octet-stream");
         request.addHeader("Content-Length", String.valueOf(bigFile.length));
         MockHttpServletResponse response = dispatch(request);
-        assertEquals(ResumableUploadCatalogResource.RESUME_INCOMPLETE.getCode(), response.getStatus());
+        assertEquals(
+                ResumableUploadCatalogResource.RESUME_INCOMPLETE.getCode(), response.getStatus());
         assertEquals(null, response.getHeader("Content-Length"));
         assertEquals("0-" + (partialSize - 1), response.getHeader("Range"));
         File uploadedFile = getTempPath(uploadId);
@@ -182,21 +183,27 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         request = createRequest("/rest/resumableupload/" + uploadId);
         request.setMethod("PUT");
         request.setContentType("application/octet-stream");
-        byte[] partialFile2 = ArrayUtils.subarray(bigFile, (int) partialSize, (int) partialSize * 2);
+        byte[] partialFile2 =
+                ArrayUtils.subarray(bigFile, (int) partialSize, (int) partialSize * 2);
         request.setContent(partialFile2);
         request.addHeader("Content-type", "application/octet-stream");
         request.addHeader("Content-Length", String.valueOf(partialFile2.length));
-        request.addHeader("Content-Range", "bytes " + partialSize + "-" + partialSize * 2 + "/" + bigFile.length);
+        request.addHeader(
+                "Content-Range",
+                "bytes " + partialSize + "-" + partialSize * 2 + "/" + bigFile.length);
         MockHttpServletResponse response = dispatch(request);
-        assertEquals(ResumableUploadCatalogResource.RESUME_INCOMPLETE.getCode(), response.getStatus());
+        assertEquals(
+                ResumableUploadCatalogResource.RESUME_INCOMPLETE.getCode(), response.getStatus());
         assertEquals(null, response.getHeader("Content-Length"));
         assertEquals("0-" + (partialSize * 2 - 1), response.getHeader("Range"));
         File uploadedFile = getTempPath(uploadId);
         assertTrue(uploadedFile.exists());
         assertEquals(partialSize * 2, uploadedFile.length());
         // Check uploaded file byte by byte
-        boolean checkBytes = Arrays.equals(
-                ArrayUtils.addAll(partialFile1, partialFile2), toBytes(new FileInputStream(uploadedFile)));
+        boolean checkBytes =
+                Arrays.equals(
+                        ArrayUtils.addAll(partialFile1, partialFile2),
+                        toBytes(new FileInputStream(uploadedFile)));
         assertTrue(checkBytes);
     }
 
@@ -223,7 +230,9 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         request.setContent(partialFile2);
         request.addHeader("Content-type", "application/octet-stream");
         request.addHeader("Content-Length", String.valueOf(partialFile2.length));
-        request.addHeader("Content-Range", "bytes " + partialSize + "-" + bigFile.length + "/" + bigFile.length);
+        request.addHeader(
+                "Content-Range",
+                "bytes " + partialSize + "-" + bigFile.length + "/" + bigFile.length);
         MockHttpServletResponse response = dispatch(request);
         assertEquals(Status.SUCCESS_OK.getCode(), response.getStatus());
 
@@ -245,7 +254,8 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
     public void testPartialCleanup() throws Exception {
         // Change cleanup expirationDelay
         ResumableUploadResourceCleaner cleaner =
-                (ResumableUploadResourceCleaner) applicationContext.getBean("resumableUploadStorageCleaner");
+                (ResumableUploadResourceCleaner)
+                        applicationContext.getBean("resumableUploadStorageCleaner");
         cleaner.setExpirationDelay(1000);
         // Upload file
         String uploadId = sendPostRequest();
@@ -274,7 +284,8 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
     public void testSidecarCleanup() throws Exception {
         // Change cleanup expirationDelay
         ResumableUploadResourceCleaner cleaner =
-                (ResumableUploadResourceCleaner) applicationContext.getBean("resumableUploadStorageCleaner");
+                (ResumableUploadResourceCleaner)
+                        applicationContext.getBean("resumableUploadStorageCleaner");
         cleaner.setExpirationDelay(1000);
         // Upload file
         String uploadId = sendPostRequest();
@@ -290,7 +301,9 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         File uploadedFile = getTempPath(uploadId);
         assertFalse(uploadedFile.exists());
         File sidecarFile =
-                new File(FilenameUtils.concat(tmpUploadFolder.dir().getCanonicalPath(), uploadId + ".sidecar"));
+                new File(
+                        FilenameUtils.concat(
+                                tmpUploadFolder.dir().getCanonicalPath(), uploadId + ".sidecar"));
         assertTrue(sidecarFile.exists());
         // Wait to cleanup, max 2 minutes
         long startTime = new Date().getTime();
@@ -300,7 +313,8 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         assertFalse(sidecarFile.exists());
 
         // Test GET after sidecar cleanup
-        MockHttpServletResponse response = getAsServletResponse("/rest/resumableupload/" + uploadId, "text/plain");
+        MockHttpServletResponse response =
+                getAsServletResponse("/rest/resumableupload/" + uploadId, "text/plain");
         assertEquals(Status.CLIENT_ERROR_NOT_FOUND.getCode(), response.getStatus());
 
         cleaner.setExpirationDelay(300000);
@@ -323,8 +337,10 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         File uploadedFile = getTempPath(uploadId);
         assertTrue(uploadedFile.exists());
 
-        MockHttpServletResponse response = getAsServletResponse("/rest/resumableupload/" + uploadId, "text/plain");
-        assertEquals(ResumableUploadCatalogResource.RESUME_INCOMPLETE.getCode(), response.getStatus());
+        MockHttpServletResponse response =
+                getAsServletResponse("/rest/resumableupload/" + uploadId, "text/plain");
+        assertEquals(
+                ResumableUploadCatalogResource.RESUME_INCOMPLETE.getCode(), response.getStatus());
         assertEquals(null, response.getHeader("Content-Length"));
         assertEquals("0-" + (partialSize - 1), response.getHeader("Range"));
     }
@@ -344,7 +360,9 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
         MockHttpServletResponse response = dispatch(request);
         assertEquals(Status.SUCCESS_OK.getCode(), response.getStatus());
         File sidecarFile =
-                new File(FilenameUtils.concat(tmpUploadFolder.dir().getCanonicalPath(), uploadId + ".sidecar"));
+                new File(
+                        FilenameUtils.concat(
+                                tmpUploadFolder.dir().getCanonicalPath(), uploadId + ".sidecar"));
         assertTrue(sidecarFile.exists());
     }
 
@@ -367,7 +385,11 @@ public class ResumableUploadTest extends CatalogRESTTestSupport {
 
     private File getTempPath(String uploadId) throws IOException {
         String tempPath =
-                FilenameUtils.removeExtension(fileName) + "_" + uploadId + "." + FilenameUtils.getExtension(fileName);
+                FilenameUtils.removeExtension(fileName)
+                        + "_"
+                        + uploadId
+                        + "."
+                        + FilenameUtils.getExtension(fileName);
         tempPath = tempPath.replaceAll("^/", "");
         tempPath = FilenameUtils.concat(tmpUploadFolder.dir().getCanonicalPath(), tempPath);
         return new File(tempPath);

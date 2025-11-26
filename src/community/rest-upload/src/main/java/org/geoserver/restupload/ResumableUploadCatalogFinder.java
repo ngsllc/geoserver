@@ -31,7 +31,8 @@ public class ResumableUploadCatalogFinder extends AbstractCatalogFinder {
                 getContext(), request, response, catalog, resumableUploadResourceManager);
     }
 
-    public void setResumableUploadResourceManager(ResumableUploadResourceManager resumableUploadResourceManager) {
+    public void setResumableUploadResourceManager(
+            ResumableUploadResourceManager resumableUploadResourceManager) {
         this.resumableUploadResourceManager = resumableUploadResourceManager;
     }
 }
