@@ -209,20 +209,29 @@ Property Precedence
 
 The `FIPS_MODE` setting is resolved in the following order:
 
-1. Environment variable `FIPS_MODE` (highest priority)
-2. System property `-DFIPS_MODE` 
+1. System property `-DFIPS_MODE` (highest priority - allows runtime override)
+2. Environment variable `FIPS_MODE` 
 3. Default: `false` (non-FIPS mode)
+
+This priority order allows system properties to override environment variables, which is useful for:
+- Testing with different FIPS modes without changing the environment
+- Per-instance configuration in containerized deployments
+- Temporary overrides for debugging
 
 Examples:
 
 .. code-block:: bash
 
-   # Environment variable (highest priority)
+   # System property (highest priority - overrides environment)
+   java -DFIPS_MODE=true -jar geoserver.war
+
+   # Environment variable
    export FIPS_MODE=true
    java -jar geoserver.war
 
-   # System property
-   java -DFIPS_MODE=true -jar geoserver.war
+   # System property overriding environment variable
+   export FIPS_MODE=false
+   java -DFIPS_MODE=true -jar geoserver.war  # FIPS will be enabled
 
    # Default (FIPS disabled)
    java -jar geoserver.war

@@ -84,6 +84,6 @@ For FIPS 140-2 compliance, GeoServer includes built-in FIPS support. To run in F
 
 .. code-block:: bash
 
-   mvn jetty:run -Dcom.redhat.fips=true
+   mvn jetty:run -DFIPS_MODE=true
 
-See the :ref:`FIPS documentation <security_fips>` for complete FIPS configuration details.
+See the :ref:`FIPS documentation <security_fips_dev>` for complete FIPS configuration details.

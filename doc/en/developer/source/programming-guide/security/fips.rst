@@ -16,7 +16,7 @@ This enables safe migration without breaking existing deployments.
 Key Features
 ~~~~~~~~~~~
 
-* **Automatic FIPS Detection**: Detects FIPS mode through system properties
+* **Automatic FIPS Detection**: Detects FIPS mode through system properties (highest priority) or environment variables
 * **Filename Inference**: Infers keystore type from extension
 * **Legacy Fallback**: Falls back to legacy keystore files when the configured one is missing
 * **Provider Fallback**: Registers/uses BouncyCastle providers for BCFKS when necessary
