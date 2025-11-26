@@ -61,8 +61,8 @@
   <bean id="strongPbePasswordEncoder"    
     class="org.geoserver.security.password.GeoServerPBEPasswordEncoder" scope="prototype">
     <property name="prefix" value="crypt2" />
-    <property name="providerName" value="#{ systemProperties['geoserver.encryption.provider'] ?: (T(org.geoserver.security.password.GeoServerPBEPasswordEncoder).isBcAvailable() ? 'BC' : (T(org.geoserver.security.password.GeoServerPBEPasswordEncoder).isBcFipsAvailable() ? 'BCFIPS' : 'SunJCE')) }" />
-    <property name="algorithm" value="#{ systemProperties['geoserver.encryption.algorithm'] ?: (T(org.geoserver.security.password.GeoServerPBEPasswordEncoder).isBcAvailable() ? 'PBEWITHSHA256AND256BITAES-CBC-BC' : (T(org.geoserver.security.password.GeoServerPBEPasswordEncoder).isBcFipsAvailable() ? 'PBEWITHSHA256AND256BITAES-BC' : 'PBEWithMD5AndDES')) }" />
+    <property name="providerName" value="#{ systemProperties['geoserver.encryption.provider'] ?: 'BCFIPS' }" />
+    <property name="algorithm" value="#{ systemProperties['geoserver.encryption.algorithm'] ?: 'PBEWITHSHA256AND256BITAES-BC' }" />
     <property name="availableWithoutStrongCryptogaphy" value="false" />
   </bean>  
   <bean id="digestPasswordEncoder"    
