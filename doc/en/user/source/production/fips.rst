@@ -1,18 +1,20 @@
 .. _production_fips:
 
-FIPS 140-2 Compliance
+FIPS 140-3 Compliance
 =====================
 
-GeoServer supports FIPS 140-2 compliance through the use of BouncyCastle FIPS (BC-FIPS) cryptographic modules and FIPS-compliant keystore formats. This enables GeoServer to meet federal and enterprise security requirements.
+GeoServer supports FIPS 140-3 compliance through the use of BouncyCastle FIPS (BC-FIPS) cryptographic modules and FIPS-compliant keystore formats. This enables GeoServer to meet federal and enterprise security requirements.
+
+For more information about FIPS standards, see the `NIST FIPS 140-3 documentation <https://csrc.nist.gov/pubs/fips/140-3/final>`_. For BouncyCastle FIPS certification details, see `BouncyCastle Certifications <https://www.bouncycastle.org/documentation/specification_interoperability/>`_.
 
 Overview
 --------
 
-FIPS (Federal Information Processing Standards) 140-2 is a U.S. government computer security standard that specifies requirements for cryptographic modules. GeoServer's FIPS implementation provides:
+FIPS (Federal Information Processing Standards) 140-3 is a U.S. government computer security standard that specifies requirements for cryptographic modules. GeoServer's FIPS implementation provides:
 
 * **BCFKS Keystore Support**: BouncyCastle FIPS KeyStore format for secure key storage
-* **FIPS-Compliant Algorithms**: Cryptographic algorithms that meet FIPS 140-2 requirements
-* **Backward Compatibility**: Support for existing JCEKS keystores with automatic migration
+* **FIPS-Compliant Algorithms**: Cryptographic algorithms that meet FIPS 140-3 requirements
+* **Backward Compatibility**: Automatic migration between JCEKS and BCFKS keystores
 * **Environment Configuration**: Flexible deployment through environment variables
 
 Enabling FIPS Mode

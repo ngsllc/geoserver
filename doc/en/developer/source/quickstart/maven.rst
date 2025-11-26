@@ -80,7 +80,7 @@ command::
 FIPS Mode
 ---------
 
-For FIPS 140-2 compliance, GeoServer includes built-in FIPS support. To run in FIPS mode:
+For FIPS 140-3 compliance, GeoServer includes built-in FIPS support. To run in FIPS mode:
 
 .. code-block:: bash
 

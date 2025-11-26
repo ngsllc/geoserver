@@ -9,9 +9,9 @@ FIPS-aware keystore handling
 ---------------------------
 
 GeoServer's ``KeyStoreProviderImpl`` detects FIPS mode via the ``FIPS_MODE`` environment variable and automatically
-selects the appropriate keystore type: BCFKS for FIPS mode, JCEKS for non-FIPS mode. It also infers the keystore 
-type from the filename extension and falls back to legacy keystore files if the configured file is not present. 
-This enables safe migration without breaking existing deployments.
+selects the appropriate keystore type: BCFKS for FIPS mode, JCEKS for non-FIPS mode. It also automatically migrates
+keystores between formats when FIPS mode changes, infers the keystore type from the filename extension, and falls
+back to legacy keystore files if the configured file is not present.
 
 Key Features
 ~~~~~~~~~~~
@@ -36,7 +36,7 @@ GeoServer includes BC-FIPS libraries by default. No special profiles are needed.
    mvn clean install
 
 **What's Included:**
-* BC-FIPS libraries for FIPS 140-2 compliance
+* BC-FIPS libraries for FIPS 140-3 compliance
 * BCFKS and JCEKS keystore support
 
 **Technical Implementation:**
@@ -206,4 +206,4 @@ When developing FIPS-compliant features, ensure compliance with the following st
     * Maintain detailed security audit logs
     * Follow secure coding practices to prevent common vulnerabilities
 
-For specific compliance requirements, consult your organization's security policies and the relevant standards documentation. GeoServer's FIPS implementation focuses on FIPS 140-2 Level 1 compliance for cryptographic operations. 
+For specific compliance requirements, consult your organization's security policies and the relevant standards documentation. GeoServer's FIPS implementation focuses on FIPS 140-3 Level 1 compliance for cryptographic operations. 
