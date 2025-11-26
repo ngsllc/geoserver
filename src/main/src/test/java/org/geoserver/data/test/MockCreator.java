@@ -427,7 +427,7 @@ public class MockCreator implements Callback {
         GeoServerPBEPasswordEncoder strongPbePwe = new GeoServerPBEPasswordEncoder();
         strongPbePwe.setBeanName("strongPbePasswordEncoder");
         strongPbePwe.setPrefix("crypt2");
-        strongPbePwe.setProviderName("BC");
+        strongPbePwe.setProviderName("BCFIPS");
         strongPbePwe.setAvailableWithoutStrongCryptogaphy(false);
         strongPbePwe.initialize(secMgr);
         return strongPbePwe;

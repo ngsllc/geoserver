@@ -23,187 +23,151 @@ FIPS mode can be enabled through environment variables or system properties. **N
 Environment Variables
 ~~~~~~~~~~~~~~~~~~~~
 
-Set the following system property before starting GeoServer:
+Set the FIPS_MODE environment variable before starting GeoServer:
 
 .. code-block:: bash
 
-   java -Dcom.redhat.fips=true \
-        -DGEOSERVER_KEYSTORE_TYPE=PKCS12 \
-        -DGEOSERVER_KEYSTORE_PROVIDER=BCFIPS \
-        -jar geoserver.war
+   # Using environment variable
+   export FIPS_MODE=true
+   java -jar geoserver.war
 
-**Note**: The `GEOSERVER_KEYSTORE_TYPE` and `GEOSERVER_KEYSTORE_PROVIDER` variables are optional. If not set, GeoServer will use sensible defaults:
-- `GEOSERVER_KEYSTORE_TYPE`: Defaults to `JCEKS` in non-FIPS mode, `PKCS12` in FIPS mode
-- `GEOSERVER_KEYSTORE_PROVIDER`: Defaults to `SunJCE` in non-FIPS mode, `BCFIPS` (or `BC`) in FIPS mode
+   # Or using system property
+   java -DFIPS_MODE=true -jar geoserver.war
+
+When `FIPS_MODE=true`, GeoServer automatically:
+- Uses BCFKS keystore format (FIPS-compliant)
+- Registers BouncyCastle FIPS provider (BCFIPS)
+- Enforces FIPS-approved cryptographic algorithms
+
+When `FIPS_MODE=false` or unset, GeoServer uses:
+- JCEKS keystore format (traditional Java keystore)
+- Standard Java cryptographic providers
 
 
 Docker Container
 ~~~~~~~~~~~~~~~
 
-For containerized deployments, you have several options:
-
-**Option 1: Use GeoServer with FIPS Environment**
-Configure GeoServer for FIPS mode:
+For containerized deployments:
 
 .. code-block:: bash
 
    docker run -d \
      -p 8080:8080 \
-     -e JAVA_OPTS="-Dcom.redhat.fips=true -DGEOSERVER_KEYSTORE_TYPE=PKCS12 -DGEOSERVER_KEYSTORE_PROVIDER=BCFIPS" \
+     -e FIPS_MODE=true \
      geoserver/geoserver:latest
 
-**Option 2: Build Custom FIPS-Enabled Image**
-If you need a dedicated FIPS-enabled image, create a custom Dockerfile:
+Or using a custom Dockerfile:
 
 .. code-block:: dockerfile
 
    FROM geoserver/geoserver:latest
-   # Install BouncyCastle FIPS libraries
-   # Configure FIPS mode in the container
    ENV FIPS_MODE=true
-   ENV GEOSERVER_KEYSTORE_TYPE=BCFKS
 
-**Note**: The official GeoServer Docker image can be configured for FIPS mode using environment variables as shown above. A dedicated FIPS-enabled image may be provided in future releases.
+**Note**: The official GeoServer Docker image can be configured for FIPS mode using the FIPS_MODE environment variable. The keystore type and provider are automatically selected based on this setting.
 
 Building with FIPS Support
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-GeoServer now includes BC-FIPS libraries by default in all builds, providing universal FIPS compatibility:
+GeoServer includes BC-FIPS libraries by default in all builds:
 
 .. code-block:: bash
 
-   # Standard build now includes FIPS support
+   # Standard build includes FIPS support
    mvn clean install
 
 **What's Included:**
-* ✅ BC-FIPS libraries (always included)
-* ✅ Regular BouncyCastle libraries (always included)
-* ✅ Runtime detection for appropriate provider selection
-* ✅ Single distribution works on both FIPS and non-FIPS systems
+* ✅ BC-FIPS libraries for FIPS 140-2 compliance
+* ✅ BCFKS keystore support for FIPS mode
+* ✅ JCEKS keystore support for non-FIPS mode
+* ✅ Automatic provider and keystore selection based on ``FIPS_MODE``
 
-Universal Distribution Details
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The universal distribution includes both BC-FIPS and regular BouncyCastle libraries. At runtime:
-
-* **FIPS Mode**: Loads BC-FIPS providers when ``com.redhat.fips=true``
-* **Non-FIPS Mode**: Uses regular BouncyCastle providers
-* **Automatic Detection**: No manual classpath configuration needed
-
-**How It Works:**
-
-1. **Package Sealing**: BC-FIPS and regular BC cannot be loaded simultaneously due to package sealing restrictions
-
-2. **Conditional Loading**: GeoServer's security framework only loads the appropriate provider:
-   - ``KeyStoreProviderImpl.isFipsEnvironment()`` detects FIPS mode
-   - ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` loads the correct provider
-
-3. **ClassLoader Isolation**: Even though both JARs are present, only one provider is registered in the JVM
-
-This approach leverages the existing conditional provider loading in GeoServer's security framework, ensuring compatibility across environments without manual configuration.
-
-**Testing Universal Distribution:**
+**Testing FIPS Mode:**
 
 .. code-block:: bash
 
    # Test FIPS mode
-   java -Dcom.redhat.fips=true -jar geoserver.war &
-   # Logs should show: "Successfully registered BouncyCastle FIPS provider"
-
-   # Test non-FIPS mode
+   export FIPS_MODE=true
    java -jar geoserver.war &
-   # Logs should show: "Successfully registered standard BouncyCastle provider"
+   # Logs should show: "Successfully registered BouncyCastle FIPS provider"
+   # Keystore: geoserver.bcfks
 
-Both modes work with the same distribution - no rebuild or JAR swapping required!
+   # Test non-FIPS mode (uses FIPS libraries with non-FIPS algorithms)
+   export FIPS_MODE=false
+   java -jar geoserver.war &
+   # Keystore: geoserver.jceks
 
-**Dependency Conflicts**
+The same distribution works in both modes - no rebuild required!
 
-BouncyCastle FIPS providers cannot coexist with regular BouncyCastle providers in the same classpath due to package sealing requirements. If you encounter errors like:
 
-.. code-block:: text
-
-   java.lang.SecurityException: sealing violation: can't seal package org.bouncycastle.crypto: already defined
-
-This indicates that both regular and FIPS BouncyCastle providers are present. To resolve this:
-
-1. **For FIPS mode**: Ensure only FIPS dependencies (`bc-fips`, `bcpkix-fips`) are in the classpath
-2. **For standard mode**: Ensure only regular dependencies (`bcprov-jdk18on`, `bcpkix-jdk18on`) are in the classpath
-3. **For testing**: The Maven build marks FIPS dependencies as optional to avoid conflicts
 
 Keystore Configuration
 ---------------------
 
-GeoServer supports multiple keystore types for different security requirements:
+GeoServer automatically selects the appropriate keystore format based on FIPS mode:
 
 BCFKS (BouncyCastle FIPS KeyStore)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The BCFKS format provides FIPS 140-2 compliance:
+Used automatically when ``FIPS_MODE=true``:
 
-.. code-block:: properties
-
-   GEOSERVER_KEYSTORE_TYPE=BCFKS
-   GEOSERVER_KEYSTORE_PROVIDER=BC
+- **Format**: BCFKS (BouncyCastle FIPS KeyStore)
+- **Provider**: BCFIPS (or BC as fallback)
+- **File**: ``geoserver.bcfks``
+- **Compliance**: FIPS 140-2 compliant
 
 JCEKS (Java Cryptography Extension KeyStore)
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Traditional Java keystore format for backward compatibility:
+Used automatically when ``FIPS_MODE=false`` or unset:
 
-.. code-block:: properties
+- **Format**: JCEKS
+- **Provider**: SunJCE (default Java provider)
+- **File**: ``geoserver.jceks``
+- **Compatibility**: Traditional Java keystore for backward compatibility
 
-   GEOSERVER_KEYSTORE_TYPE=JCEKS
-   GEOSERVER_KEYSTORE_PROVIDER=SunJCE
+Automatic Migration
+~~~~~~~~~~~~~~~~~~
 
-PKCS12
-~~~~~~
+GeoServer automatically handles keystore migration when switching between FIPS and non-FIPS modes:
 
-Standard format for certificate and key storage. PKCS12 is included as an option because it provides a widely-supported, industry-standard format that is compatible with many tools and systems while still offering good security properties:
+**Switching to FIPS mode:**
 
-.. code-block:: properties
+When you set ``FIPS_MODE=true``, GeoServer will:
 
-   GEOSERVER_KEYSTORE_TYPE=PKCS12
-   GEOSERVER_KEYSTORE_PROVIDER=BC
+1. Look for ``geoserver.bcfks``
+2. If not found, look for ``geoserver.jceks`` (legacy)
+3. If legacy found with wrong type, automatically recreate as BCFKS
+4. If nothing found, create new ``geoserver.bcfks``
 
-Migrating existing JCEKS to PKCS12
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+**Manual Migration (Optional):**
 
-When moving to FIPS, convert existing ``geoserver.jceks`` to PKCS12:
+If you prefer to manually convert an existing keystore:
 
 .. code-block:: bash
 
-   # backup first
+   # Backup first
    cp /path/to/data/security/geoserver.jceks /path/to/data/security/geoserver.jceks.bak
 
-   MASTER='geoserver'  # GeoServer master password (default for local dev)
+   MASTER='geoserver'  # GeoServer master password
+   
+   # Convert JCEKS to BCFKS
    keytool -importkeystore \
      -srckeystore /path/to/data/security/geoserver.jceks \
      -srcstoretype JCEKS \
      -srcstorepass "$MASTER" \
-     -destkeystore /path/to/data/security/geoserver.pkcs12 \
-     -deststoretype PKCS12 \
+     -destkeystore /path/to/data/security/geoserver.bcfks \
+     -deststoretype BCFKS \
      -deststorepass "$MASTER" \
+     -providername BCFIPS \
+     -providerclass org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider \
+     -providerpath /path/to/bc-fips.jar \
      -noprompt
 
-   # verify
-   keytool -list -keystore /path/to/data/security/geoserver.pkcs12 -storetype PKCS12 -storepass "$MASTER"
+   # Verify
+   keytool -list -keystore /path/to/data/security/geoserver.bcfks \
+     -storetype BCFKS -storepass "$MASTER"
 
-Optionally convert to BCFKS:
-
-.. code-block:: bash
-
-   keytool -importkeystore \
-     -srckeystore /path/to/data/security/geoserver.jceks -srcstoretype JCEKS -srcstorepass "$MASTER" \
-     -destkeystore /path/to/data/security/geoserver.bcfks -deststoretype BCFKS -deststorepass "$MASTER" -noprompt
-
-After conversion, either set:
-
-.. code-block:: bash
-
-   export GEOSERVER_KEYSTORE_TYPE=PKCS12
-
-or rely on filename-based type detection introduced in this branch. If the configured keystore is missing,
-GeoServer will attempt loading legacy ``geoserver.jceks`` for backward compatibility.
+**Note**: GeoServer's automatic migration handles type detection and recreation transparently.
 
 Verifying FIPS Mode
 ------------------
@@ -221,19 +185,13 @@ Check that FIPS mode is active by examining the GeoServer logs:
 Environment Variable Reference
 -----------------------------
 
-+------------------------+-------------+------------------+------------------+
-| Variable               | Default     | Description      | Values           |
-+========================+=============+==================+==================+
-| FIPS_MODE              | false       | Enable FIPS mode | true, false      |
-+------------------------+-------------+------------------+------------------+
-| GEOSERVER_KEYSTORE_TYPE| JCEKS       | Keystore format  | BCFKS, JCEKS,    |
-|                        | (PKCS12 in  |                  | PKCS12           |
-|                        | FIPS mode)  |                  |                  |
-+------------------------+-------------+------------------+------------------+
-| GEOSERVER_KEYSTORE_    | SunJCE      | Keystore provider| BC, SunJCE       |
-| PROVIDER               | (BC in      |                  |                  |
-|                        | FIPS mode)  |                  |                  |
-+------------------------+-------------+------------------+------------------+
++------------------------+-------------+-------------------------------------------+
+| Variable               | Default     | Description                               |
++========================+=============+===========================================+
+| FIPS_MODE              | false       | Enable FIPS mode (true/false)             |
+|                        |             | - true: Uses BCFKS keystore with BCFIPS   |
+|                        |             | - false: Uses JCEKS keystore with SunJCE  |
++------------------------+-------------+-------------------------------------------+
 
 Implementation Details
 ---------------------
@@ -241,25 +199,33 @@ Implementation Details
 Provider Registration
 ~~~~~~~~~~~~~~~~~~~
 
-The FIPS implementation automatically registers BouncyCastle providers when needed:
+The FIPS implementation automatically registers the BouncyCastle FIPS provider when needed:
 
-* **BCFIPS Provider**: Used when available for FIPS-compliant operations
-* **BC Provider**: Fallback provider for BouncyCastle functionality
-* **Automatic Detection**: The system detects available providers and uses the most appropriate one
+* **BCFIPS Provider**: Used for all BouncyCastle cryptographic operations
+* **Automatic Detection**: The system automatically registers the BCFIPS provider if not already available
 
 Property Precedence
 ~~~~~~~~~~~~~~~~~~
 
-Configuration values are resolved in the following order:
+The `FIPS_MODE` setting is resolved in the following order:
 
-1. Environment variables (highest priority)
-2. System properties (same names as environment variables)
-3. Default values (lowest priority)
+1. Environment variable `FIPS_MODE` (highest priority)
+2. System property `-DFIPS_MODE` 
+3. Default: `false` (non-FIPS mode)
 
-For example, `GEOSERVER_KEYSTORE_TYPE` can be set via:
-* Environment variable: `export GEOSERVER_KEYSTORE_TYPE=BCFKS`
-* System property: `-DGEOSERVER_KEYSTORE_TYPE=BCFKS`
-* Default: `JCEKS` (or `PKCS12` in FIPS mode)
+Examples:
+
+.. code-block:: bash
+
+   # Environment variable (highest priority)
+   export FIPS_MODE=true
+   java -jar geoserver.war
+
+   # System property
+   java -DFIPS_MODE=true -jar geoserver.war
+
+   # Default (FIPS disabled)
+   java -jar geoserver.war
 
 Security Considerations
 ----------------------

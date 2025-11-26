@@ -32,24 +32,20 @@ import org.springframework.beans.factory.BeanNameAware;
  *
  * <p><strong>requires a master password</strong> form {@link MasterPasswordProvider}
  *
- * <p>The type of the keystore can be configured via the GEOSERVER_KEYSTORE_TYPE environment variable. If not set,
- * defaults to JCEKS in non-FIPS mode and PKCS12 in FIPS mode. Supported types include JCEKS, BCFKS, and others
- * supported by the JVM. The keystore can be used/modified with java tools like "keytool" from the command line.
+ * <p>The type of the keystore is automatically determined based on FIPS mode. When FIPS_MODE environment variable is
+ * set to "true", BCFKS keystore format is used. Otherwise, JCEKS format is used. The keystore can be used/modified with
+ * java tools like "keytool" from the command line.
  *
  * @author christian
  */
 public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     public static final String DEFAULT_BEAN_NAME = "DefaultKeyStoreProvider";
-    public static final String KEYSTORE_TYPE_ENV_VAR = "GEOSERVER_KEYSTORE_TYPE";
-    public static final String KEYSTORE_PROVIDER_ENV_VAR = "GEOSERVER_KEYSTORE_PROVIDER";
+    public static final String FIPS_MODE_ENV_VAR = "FIPS_MODE";
     public static final String DEFAULT_KEYSTORE_TYPE = "JCEKS";
     public static final String BCFKS_KEYSTORE_TYPE = "BCFKS";
-    public static final String PKCS12_KEYSTORE_TYPE = "PKCS12";
     public static final String BCFIPS_PROVIDER = "BCFIPS";
-    public static final String BC_PROVIDER = "BC";
     public static final String DEFAULT_SECRET_KEY_ALGORITHM = "AES";
-    public static final String FIPS_PROPERTY_NAME = "com.redhat.fips";
 
     // Dynamic file names based on keystore type
     private String defaultFileName;
@@ -75,24 +71,24 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         initializeFileNames();
     }
 
-    /** Gets the keystore type from configuration, defaulting based on environment (FIPS→PKCS12, else JCEKS) */
+    /** Gets the keystore type based on FIPS mode: BCFKS for FIPS, JCEKS otherwise */
     public static String getKeyStoreType() {
-        String envType = System.getenv(KEYSTORE_TYPE_ENV_VAR);
-        if (envType != null && !envType.trim().isEmpty()) {
-            return envType.trim();
-        }
-        String propType = System.getProperty(KEYSTORE_TYPE_ENV_VAR);
-        if (propType != null && !propType.trim().isEmpty()) {
-            return propType.trim();
-        }
-        // Default based on environment
-        return isFipsEnvironment() ? PKCS12_KEYSTORE_TYPE : DEFAULT_KEYSTORE_TYPE;
+        return isFipsMode() ? BCFKS_KEYSTORE_TYPE : DEFAULT_KEYSTORE_TYPE;
     }
 
-    /** Detects if the runtime indicates a FIPS-enabled environment */
-    private static boolean isFipsEnvironment() {
-        String fipsProperty = System.getProperty(FIPS_PROPERTY_NAME);
-        return "true".equals(fipsProperty);
+    /** Detects if FIPS mode is enabled via FIPS_MODE environment variable */
+    public static boolean isFipsMode() {
+        // Check environment variable first
+        String envValue = System.getenv(FIPS_MODE_ENV_VAR);
+        if (envValue != null && !envValue.trim().isEmpty()) {
+            return "true".equalsIgnoreCase(envValue.trim());
+        }
+        // Check system property as fallback
+        String propValue = System.getProperty(FIPS_MODE_ENV_VAR);
+        if (propValue != null && !propValue.trim().isEmpty()) {
+            return "true".equalsIgnoreCase(propValue.trim());
+        }
+        return false;
     }
 
     /** Gets the appropriate provider for the keystore type */
@@ -103,29 +99,16 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     /** Gets the appropriate provider for a specific keystore type */
     public static String getKeyStoreProviderForType(String keystoreType) {
-        // Check environment variable first
-        String envProvider = System.getenv(KEYSTORE_PROVIDER_ENV_VAR);
-        if (envProvider != null && !envProvider.trim().isEmpty()) {
-            return envProvider.trim();
-        }
-
         if (BCFKS_KEYSTORE_TYPE.equals(keystoreType)) {
-            // Try to find available BouncyCastle provider
-            if (java.security.Security.getProvider(BCFIPS_PROVIDER) != null) {
-                return BCFIPS_PROVIDER;
-            } else if (java.security.Security.getProvider(BC_PROVIDER) != null) {
-                return BC_PROVIDER;
-            } else {
-                // Default to BC if no provider is found (will be registered later)
-                return BC_PROVIDER;
-            }
+            // BCFKS requires BouncyCastle FIPS provider (will be registered if not available)
+            return BCFIPS_PROVIDER;
         }
         return null; // Use default provider for other types
     }
 
     /**
      * Infer keystore type from the file path extension, falling back to the provided default type. Recognized
-     * extensions: .jceks, .jks, .bcfks, .pkcs12
+     * extensions: .jceks, .jks, .bcfks
      */
     private static final java.util.Map<String, String> EXTENSION_TO_TYPE_MAP = new java.util.HashMap<>();
 
@@ -133,9 +116,6 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         EXTENSION_TO_TYPE_MAP.put(".jceks", "JCEKS");
         EXTENSION_TO_TYPE_MAP.put(".jks", "JKS");
         EXTENSION_TO_TYPE_MAP.put(".bcfks", "BCFKS");
-        EXTENSION_TO_TYPE_MAP.put(".pkcs12", PKCS12_KEYSTORE_TYPE);
-        EXTENSION_TO_TYPE_MAP.put(".p12", PKCS12_KEYSTORE_TYPE);
-        EXTENSION_TO_TYPE_MAP.put(".pfx", PKCS12_KEYSTORE_TYPE);
     }
 
     private static String inferTypeFromPathOrDefault(String filePath, String defaultType) {
@@ -156,9 +136,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         if (provider != null && java.security.Security.getProvider(provider) == null) {
             try {
                 if (BCFIPS_PROVIDER.equals(provider)) {
-                    // Try to load BouncyCastle FIPS provider
-                    // Note: This may fail if FIPS libraries are not in classpath or if regular BC provider is already
-                    // loaded.
+                    // Load BouncyCastle FIPS provider
                     try {
                         Class<?> providerClass =
                                 Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
@@ -168,57 +146,22 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                         LOGGER.info("Successfully registered BouncyCastle FIPS provider");
                     } catch (ClassNotFoundException e) {
                         LOGGER.log(
-                                Level.WARNING,
+                                Level.SEVERE,
                                 "BouncyCastle FIPS provider not available in classpath. "
-                                        + "Ensure bc-fips dependency is included for FIPS mode.");
-                        // Fallback to regular BC provider
-                        fallbackToRegularBCProvider();
+                                        + "Ensure bc-fips dependency is included.",
+                                e);
+                        throw new RuntimeException("BouncyCastle FIPS provider required but not available", e);
                     } catch (Exception e) {
-                        if (e.getCause() != null
-                                && e.getCause() instanceof SecurityException
-                                && e.getCause().getMessage() != null
-                                && e.getCause().getMessage().contains("sealing violation")) {
-                            LOGGER.log(
-                                    Level.WARNING,
-                                    "BouncyCastle FIPS provider cannot be loaded due to package sealing conflict. "
-                                            + "This typically occurs when both regular and FIPS BouncyCastle providers are in classpath. "
-                                            + "For FIPS mode, ensure only FIPS providers are used.");
-                            // Fallback to regular BC provider
-                            fallbackToRegularBCProvider();
-                        } else {
-                            LOGGER.log(
-                                    Level.WARNING,
-                                    "Failed to register BouncyCastle FIPS provider: " + e.getMessage(),
-                                    e);
-                            fallbackToRegularBCProvider();
-                        }
+                        LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle FIPS provider: " + e.getMessage(), e);
+                        throw new RuntimeException("Failed to register BouncyCastle FIPS provider", e);
                     }
-                } else if (BC_PROVIDER.equals(provider)) {
-                    fallbackToRegularBCProvider();
                 }
+            } catch (RuntimeException e) {
+                throw e;
             } catch (Exception e) {
-                LOGGER.log(Level.WARNING, "Failed to register BouncyCastle provider: " + e.getMessage(), e);
+                LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle provider: " + e.getMessage(), e);
+                throw new RuntimeException("Failed to register BouncyCastle provider", e);
             }
-        }
-    }
-
-    private void fallbackToRegularBCProvider() {
-        try {
-            // Check if regular BC provider is already available
-            if (java.security.Security.getProvider(BC_PROVIDER) != null) {
-                return;
-            }
-
-            Class<?> providerClass = Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider");
-            java.security.Provider bcProvider = (java.security.Provider)
-                    providerClass.getDeclaredConstructor().newInstance();
-            java.security.Security.addProvider(bcProvider);
-            LOGGER.info("Successfully registered standard BouncyCastle provider as fallback");
-        } catch (Exception e) {
-            LOGGER.log(
-                    Level.WARNING,
-                    "Failed to register standard BouncyCastle provider as fallback: " + e.getMessage(),
-                    e);
         }
     }
 
@@ -451,8 +394,27 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     ks.store(fos, passwd);
                 }
             } else {
-                try (InputStream fis = getResource().in()) {
-                    ks.load(fis, passwd);
+                // Check if the keystore type matches the expected type
+                if (!effectiveType.equals(keystoreType)) {
+                    // Type mismatch, delete the existing keystore and create a new one with correct type
+                    LOGGER.log(
+                            Level.INFO,
+                            "Keystore type mismatch (expected: " + keystoreType + ", found: " + effectiveType
+                                    + "), recreating keystore");
+                    getResource().delete();
+                    // Recreate keystore with correct type
+                    ks = createKeyStore(keystoreType, getKeyStoreProviderForType(keystoreType));
+                    ks.load(null, passwd);
+                    addInitialKeys();
+                    try (OutputStream fos = getResource().out()) {
+                        ks.store(fos, passwd);
+                    }
+                } else {
+                    try (InputStream fis = getResource().in()) {
+                        ks.load(fis, passwd);
+                    }
+                    // Ensure initial keys are present in case the keystore was created without them
+                    ensureInitialKeys();
                 }
             }
         } catch (Exception ex) {
@@ -501,12 +463,28 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     @Override
     public void setSecretKey(String alias, char[] key) throws IOException {
         assertActivatedKeyStore();
-        // Use AES algorithm for compatibility with different keystore types
-        SecretKey mySecretKey = new SecretKeySpec(toBytes(key), DEFAULT_SECRET_KEY_ALGORITHM);
+        // Use SHA-256 hash of the password to get a valid AES key length (32 bytes)
+        byte[] keyBytes = toBytes(key);
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            keyBytes = digest.digest(keyBytes);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            // Fallback to truncating/padding to 32 bytes
+            if (keyBytes.length > 32) {
+                byte[] truncated = new byte[32];
+                System.arraycopy(keyBytes, 0, truncated, 0, 32);
+                keyBytes = truncated;
+            } else if (keyBytes.length < 32) {
+                byte[] padded = new byte[32];
+                System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
+                keyBytes = padded;
+            }
+        }
+        SecretKey mySecretKey = new SecretKeySpec(keyBytes, DEFAULT_SECRET_KEY_ALGORITHM);
         KeyStore.SecretKeyEntry skEntry = new KeyStore.SecretKeyEntry(mySecretKey);
         char[] passwd = securityManager.getMasterPassword();
         try {
-            ks.setEntry(alias, skEntry, new KeyStore.PasswordProtection(passwd));
+            ks.setEntry(alias, skEntry, new KeyStore.PasswordProtection(passwd.clone()));
         } catch (KeyStoreException e) {
             throw new IOException(e);
         } finally {
@@ -562,7 +540,61 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         RandomPasswordProvider randPasswdProvider = getSecurityManager().getRandomPassworddProvider();
 
         char[] configKey = randPasswdProvider.getRandomPasswordWithDefaultLength();
-        setSecretKey(CONFIGPASSWORDKEY, configKey);
+        // Use SHA-256 hash of the password to get a valid AES key length (32 bytes)
+        byte[] keyBytes = toBytes(configKey);
+        try {
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            keyBytes = digest.digest(keyBytes);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            // Fallback to truncating to 32 bytes
+            if (keyBytes.length > 32) {
+                byte[] truncated = new byte[32];
+                System.arraycopy(keyBytes, 0, truncated, 0, 32);
+                keyBytes = truncated;
+            } else if (keyBytes.length < 32) {
+                byte[] padded = new byte[32];
+                System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
+                keyBytes = padded;
+            }
+        }
+        SecretKey mySecretKey = new SecretKeySpec(keyBytes, DEFAULT_SECRET_KEY_ALGORITHM);
+        KeyStore.SecretKeyEntry skEntry = new KeyStore.SecretKeyEntry(mySecretKey);
+        char[] passwd = securityManager.getMasterPassword();
+        try {
+            ks.setEntry(CONFIGPASSWORDKEY, skEntry, new KeyStore.PasswordProtection(passwd.clone()));
+        } catch (KeyStoreException e) {
+            throw new IOException(e);
+        } finally {
+            securityManager.disposePassword(passwd);
+        }
+    }
+
+    /** Ensures initial keys are present, adding them if missing */
+    protected void ensureInitialKeys() throws IOException {
+        try {
+            if (!ks.containsAlias(CONFIGPASSWORDKEY)) {
+                // Try to add the key
+                addInitialKeys();
+                storeKeyStore();
+            }
+        } catch (KeyStoreException | IOException e) {
+            // If we can't add the key (perhaps due to keystore type mismatch), recreate the keystore
+            LOGGER.log(Level.WARNING, "Failed to add initial keys to existing keystore, recreating: " + e.getMessage());
+            try {
+                // Delete the existing keystore
+                Resource keystoreResource = getResource();
+                if (keystoreResource.getType() != Type.UNDEFINED) {
+                    keystoreResource.delete();
+                }
+                // Reset the keystore instance
+                ks = null;
+                // Recreate
+                assertActivatedKeyStore();
+            } catch (Exception e2) {
+                LOGGER.log(Level.SEVERE, "Failed to recreate keystore: " + e2.getMessage(), e2);
+                throw new IOException("Failed to initialize keystore", e2);
+            }
+        }
     }
 
     /* (non-Javadoc)

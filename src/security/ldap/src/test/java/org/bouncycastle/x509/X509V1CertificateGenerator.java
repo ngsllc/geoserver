@@ -15,14 +15,20 @@ import org.bouncycastle.asn1.x500.X500Name;
 // import org.bouncycastle.asn1.x509.X509Name;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v1CertificateBuilder;
-import org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
 
 public class X509V1CertificateGenerator {
     static {
-        if (Security.getProvider("BCFIPS") == null) {
-            Security.addProvider(new BouncyCastleFipsProvider());
+        // Register BCFIPS provider if not already registered
+        try {
+            Class<?> fipsProvider = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
+            if (Security.getProvider("BCFIPS") == null) {
+                Security.addProvider((java.security.Provider)
+                        fipsProvider.getDeclaredConstructor().newInstance());
+            }
+        } catch (Throwable e) {
+            // BC-FIPS provider not available
         }
     }
 
@@ -104,21 +110,37 @@ public class X509V1CertificateGenerator {
             throws CertificateEncodingException, IllegalStateException, NoSuchProviderException,
                     NoSuchAlgorithmException, SignatureException, InvalidKeyException {
         try {
-            // Force BCFIPS provider if BC is requested, as we are running with bc-fips
-            if ("BC".equals(provider)) {
-                provider = "BCFIPS";
-            }
+            // Adapt provider based on availability - always prefer what's actually registered
+            String effectiveProvider = resolveProvider(provider);
+
             JcaX509v1CertificateBuilder builder =
                     new JcaX509v1CertificateBuilder(issuerDN, serialNumber, notBefore, notAfter, subjectDN, publicKey);
 
             ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm)
-                    .setProvider(provider)
+                    .setProvider(effectiveProvider)
                     .build(key);
 
-            return new JcaX509CertificateConverter().setProvider(provider).getCertificate(builder.build(signer));
+            return new JcaX509CertificateConverter()
+                    .setProvider(effectiveProvider)
+                    .getCertificate(builder.build(signer));
 
         } catch (Exception e) {
             throw new IllegalStateException("Failed to generate certificate", e);
         }
+    }
+
+    /** Resolves the actual provider to use. Only BCFIPS is available in GeoServer. */
+    private String resolveProvider(String requestedProvider) {
+        if (requestedProvider == null || requestedProvider.isEmpty()) {
+            requestedProvider = "BCFIPS"; // Default to BCFIPS
+        }
+
+        // If the exact provider is available, use it
+        if (Security.getProvider(requestedProvider) != null) {
+            return requestedProvider;
+        }
+
+        // Default to BCFIPS (only BC provider shipped with GeoServer)
+        return "BCFIPS";
     }
 }

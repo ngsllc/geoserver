@@ -29,7 +29,7 @@ givenName: admin
 sn: admin
 uid: admin
 cn: uid=admin,ou=People,dc=example,dc=com
-userPassword: {SHA}0DPiKuNIrrVmD8IUCuw1hQxNqZc=
+userPassword: admin
 telephoneNumber: 1
 
 dn: cn=other,ou=Groups,dc=example,dc=com
@@ -47,7 +47,7 @@ givenName: other
 sn: other
 uid: other
 cn: uid=other,ou=People,dc=example,dc=com
-userPassword: {SHA}0JQeaNqPOBUf+Gph/Fn3xc+fyqI=
+userPassword: other
 telephoneNumber: 2
 
 dn: cn=extra,ou=Groups,dc=example,dc=com
@@ -64,7 +64,7 @@ givenName: nestedUser
 sn: nestedUser
 uid: nestedUser
 cn: uid=nestedUser,ou=People,dc=example,dc=com
-userPassword: {SHA}0JQeaNqPOBUf+Gph/Fn3xc+fyqI=
+userPassword: other
 telephoneNumber: 777
 
 dn: cn=nested,ou=Groups,dc=example,dc=com

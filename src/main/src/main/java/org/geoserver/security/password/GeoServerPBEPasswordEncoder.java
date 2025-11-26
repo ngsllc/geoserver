@@ -42,12 +42,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     private KeyStoreProvider keystoreProvider;
 
     public static boolean isBcAvailable() {
-        try {
-            Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider");
-            return true;
-        } catch (ClassNotFoundException e) {
-            return false;
-        }
+        return isBcFipsAvailable();
     }
 
     public static boolean isBcFipsAvailable() {
@@ -100,7 +95,8 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     protected PasswordEncoder createStringEncoder() {
         byte[] password = lookupPasswordFromKeyStore();
 
-        char[] chars = toChars(password);
+        String passwordString = Base64.getEncoder().encodeToString(password);
+        char[] chars = passwordString.toCharArray();
         try {
             stringEncrypter = new StandardPBEStringEncryptor();
             stringEncrypter.setPasswordCharArray(chars);
@@ -123,7 +119,8 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     @Override
     protected CharArrayPasswordEncoder createCharEncoder() {
         byte[] password = lookupPasswordFromKeyStore();
-        char[] chars = toChars(password);
+        String passwordString = Base64.getEncoder().encodeToString(password);
+        char[] chars = passwordString.toCharArray();
 
         byteEncrypter = new StandardPBEByteEncryptor();
         byteEncrypter.setPasswordCharArray(chars);
@@ -159,7 +156,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     }
 
     /**
-     * Ensures the requested JCE provider (e.g., "BC") is available; attempts lazy registration to preserve backward
+     * Ensures the requested JCE provider (e.g., "BCFIPS") is available; attempts lazy registration to preserve backward
      * compatibility with configurations that specify a provider.
      */
     private void ensureProviderAvailableIfRequested() {
@@ -168,15 +165,12 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
         Provider existing = Security.getProvider(requested);
         if (existing != null) return;
         try {
-            if ("BC".equals(requested)) {
-                Class<?> providerClass = Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider");
-                Security.addProvider(
-                        (Provider) providerClass.getDeclaredConstructor().newInstance());
-            } else if ("BCFIPS".equals(requested)) {
+            if ("BCFIPS".equals(requested)) {
                 Class<?> providerClass = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
                 Security.addProvider(
                         (Provider) providerClass.getDeclaredConstructor().newInstance());
             }
+            // Note: Regular BC provider is not shipped with GeoServer; only BC-FIPS is available
         } catch (ReflectiveOperationException | SecurityException ignored) {
             // If provider cannot be registered, jasypt will try default provider; acceptable fallback
         }

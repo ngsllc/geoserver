@@ -8,17 +8,13 @@ package org.geoserver.web;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.InputStreamReader;
-import java.math.BigInteger;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
-import java.security.SecureRandom;
 import java.security.Security;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.Date;
 import java.util.Enumeration;
 import java.util.logging.Level;
 import java.util.logging.Logger;
@@ -177,19 +173,11 @@ public class Start {
         ServerConnector https = null;
         if (sslHost != null && !sslHost.isEmpty()) {
             try {
-                Security.addProvider(
-                        (java.security.Provider)
-                                Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider")
-                                        .newInstance());
+                Security.addProvider((java.security.Provider)
+                        Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider")
+                                .newInstance());
             } catch (Throwable e) {
-                try {
-                    Security.addProvider(
-                            (java.security.Provider)
-                                    Class.forName("org.bouncycastle.jce.provider.BouncyCastleProvider")
-                                            .newInstance());
-                } catch (Throwable e1) {
-                    // ignore if BC is not available
-                }
+                // BC-FIPS provider not available, will use default providers
             }
             SslContextFactory.Server ssl = createSSLContextFactory(sslHost);
 
