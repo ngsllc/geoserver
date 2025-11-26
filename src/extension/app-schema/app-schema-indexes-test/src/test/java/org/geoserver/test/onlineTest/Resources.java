@@ -24,8 +24,10 @@ public final class Resources {
     public static String resourceToString(String path) {
         String result = null;
         try {
-            result = IOUtils.toString(
-                    Resources.class.getClassLoader().getResourceAsStream(path), StandardCharsets.UTF_8);
+            result =
+                    IOUtils.toString(
+                            Resources.class.getClassLoader().getResourceAsStream(path),
+                            StandardCharsets.UTF_8);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
