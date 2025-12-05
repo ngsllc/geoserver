@@ -370,7 +370,7 @@ public class MockCreator implements Callback {
                 .andReturn(true)
                 .anyTimes();
         expect(keyStoreProvider.getSecretKey(KeyStoreProviderImpl.CONFIGPASSWORDKEY))
-                .andReturn(new SecretKeySpec(toBytes("geoserver".toCharArray()), "PBE"))
+                .andReturn(new SecretKeySpec(toBytes("geoserver".toCharArray()), "AES"))
                 .anyTimes();
         expect(keyStoreProvider.hasUserGroupKey(XMLUserGroupService.DEFAULT_NAME))
                 .andReturn(true)
@@ -382,7 +382,7 @@ public class MockCreator implements Callback {
                 .anyTimes();
         expect(keyStoreProvider.containsAlias(alias)).andReturn(true).anyTimes();
         expect(keyStoreProvider.getSecretKey(alias))
-                .andReturn(new SecretKeySpec(toBytes("geoserver".toCharArray()), "PBE"))
+                .andReturn(new SecretKeySpec(toBytes("geoserver".toCharArray()), "AES"))
                 .anyTimes();
         expect(secMgr.getKeyStoreProvider()).andReturn(keyStoreProvider).anyTimes();
 
@@ -427,7 +427,7 @@ public class MockCreator implements Callback {
         GeoServerPBEPasswordEncoder strongPbePwe = new GeoServerPBEPasswordEncoder();
         strongPbePwe.setBeanName("strongPbePasswordEncoder");
         strongPbePwe.setPrefix("crypt2");
-        strongPbePwe.setProviderName("BC");
+        strongPbePwe.setProviderName("BCFIPS");
         strongPbePwe.setAvailableWithoutStrongCryptogaphy(false);
         strongPbePwe.initialize(secMgr);
         return strongPbePwe;
