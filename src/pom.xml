@@ -966,6 +966,12 @@
         <version>7.11.0</version>
         <scope>test</scope>
       </dependency>
+      <dependency>
+        <groupId>com.unboundid</groupId>
+        <artifactId>unboundid-ldapsdk</artifactId>
+        <version>6.0.11</version>
+        <scope>test</scope>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
@@ -1266,6 +1272,27 @@
           <groupId>com.github.spotbugs</groupId>
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>4.7.3.4</version>
+        </plugin>
+        <!-- Copy BC-FIPS libs to fips-libs directory for packaging.
+             Declared in pluginManagement so it only runs in modules that
+             explicitly activate it (e.g., web/app WAR module). -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <executions>
+            <execution>
+              <id>copy-fips-libs</id>
+              <phase>prepare-package</phase>
+              <goals>
+                <goal>copy-dependencies</goal>
+              </goals>
+              <configuration>
+                <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
+                <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
+                <stripVersion>true</stripVersion>
+              </configuration>
+            </execution>
+          </executions>
         </plugin>
       </plugins>
     </pluginManagement>
@@ -1677,25 +1704,6 @@
         <artifactId>versions-maven-plugin</artifactId>
       </plugin>
 
-      <!-- Copy BC-FIPS libs to fips-libs directory for packaging -->
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-dependency-plugin</artifactId>
-        <executions>
-          <execution>
-            <id>copy-fips-libs</id>
-            <phase>prepare-package</phase>
-            <goals>
-              <goal>copy-dependencies</goal>
-            </goals>
-            <configuration>
-              <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
-              <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
-              <stripVersion>true</stripVersion>
-            </configuration>
-          </execution>
-        </executions>
-      </plugin>
     </plugins>
 
   </build>

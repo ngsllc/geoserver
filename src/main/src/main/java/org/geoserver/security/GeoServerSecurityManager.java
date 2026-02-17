@@ -2029,7 +2029,7 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             ugConfig.setValidating(true);
             // In FIPS mode, we need to use strong encryption since weak algorithms are not available
             // In non-FIPS mode, start with weak encryption so plain passwords can be restored
-            Boolean strong = KeyStoreProviderImpl.isFipsMode() ? true : false;
+            boolean strong = KeyStoreProviderImpl.isFipsMode();
             GeoServerPBEPasswordEncoder encoder = loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, strong);
             ugConfig.setPasswordEncoderName(encoder.getName());
             ugConfig.setPasswordPolicyName(PasswordValidator.DEFAULT_NAME);

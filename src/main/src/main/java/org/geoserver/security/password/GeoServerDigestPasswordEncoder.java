@@ -76,6 +76,6 @@ public class GeoServerDigestPasswordEncoder extends AbstractGeoserverPasswordEnc
 
     @Override
     public String encode(CharSequence rawPassword) {
-        return createCharEncoder().encodePassword(decodeToCharArray(rawPassword.toString()), null);
+        return getCharEncoder().encodePassword(decodeToCharArray(rawPassword.toString()), null);
     }
 }

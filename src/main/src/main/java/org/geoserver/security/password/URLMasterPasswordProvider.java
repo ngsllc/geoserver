@@ -48,22 +48,13 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
     private static final Logger LOGGER = Logging.getLogger(URLMasterPasswordProvider.class);
 
     /** base encryption key */
-    //    static final char[] BASE = new char[]{ 'a', 'f', '8', 'd', 'f', 's', 's', 'v', 'j', 'K',
-    // 'L',
-    //        '0', 'I', 'H', '(', 'a', 'd', 'f', '2', 's', '0', '0', 'd', 's', '9', 'f', '2', 'o',
-    // 'f',
-    //        '(', '4', ']' };
-
     static final char[] BASE = {
         'U', 'n', '6', 'd', 'I', 'l', 'X', 'T', 'Q', 'c', 'L', ')', '$', '#', 'q', 'J', 'U',
         'l', 'X', 'Q', 'U', '!', 'n', 'n', 'p', '%', 'U', 'r', '5', 'U', 'u', '3', '5', 'H',
         '`', 'x', 'P', 'F', 'r', 'X'
     };
 
-    /** permutation indices, this permutation has a cycle of 169 --> more than 168 iterations have no effect */
-    //    static final int[] PERM = new int[]{25, 10, 5, 21, 14, 27, 23, 4, 3, 31, 16, 29, 20, 11,
-    // 0, 26,
-    //        24, 22, 13, 12, 1, 8, 18, 19, 7, 2, 17, 6, 9, 28, 30, 15};
+    /** permutation indices */
     static final int[] PERM = {
         32, 19, 30, 11, 34, 26, 3, 21, 9, 37, 38, 13, 23, 2, 18, 4, 20, 1, 29, 17, 0, 31, 14, 36, 12, 24, 15, 35, 16,
         39, 25, 5, 10, 8, 7, 6, 33, 27, 28, 22
@@ -81,10 +72,6 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
     protected char[] doGetMasterPassword() throws Exception {
         try {
             try (InputStream in = input(config.getURL(), getConfigDir())) {
-                // JD: for some reason the decrypted passwd comes back sometimes with null chars
-                // tacked on
-                // MCR, was a problem with toBytes and toChar in SecurityUtils
-                // return trimNullChars(toChars(decode(IOUtils.toByteArray(in))));
                 return toChars(decode(IOUtils.toByteArray(in)));
             }
         } catch (IOException e) {
@@ -143,8 +130,9 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             // If FIPS algorithm failed and we're not in FIPS mode, try legacy algorithm
             if (!KeyStoreProviderImpl.isFipsMode()) {
                 try {
-                    // Use null algorithm to match original GeoServer behavior (Jasypt default)
-                    byte[] decoded = decodeWithAlgorithm(passwd, null);
+                    // Explicitly use the legacy algorithm (Jasypt's default is also PBEWithMD5AndDES,
+                    // but we specify it to avoid coupling to Jasypt internals)
+                    byte[] decoded = decodeWithAlgorithm(passwd, LEGACY_PBE_ALGORITHM);
                     // Successfully decoded with legacy algorithm - migrate to FIPS algorithm
                     LOGGER.info(
                             "Master password was encrypted with legacy algorithm, migrating to FIPS-compatible algorithm");
@@ -176,7 +164,6 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
                 encryptor.setIvGenerator(new FipsRandomIvGenerator());
             }
         }
-        // For null algorithm (legacy), don't set anything - use Jasypt defaults
         char[] key = key();
         try {
             encryptor.setPasswordCharArray(key);
@@ -187,45 +174,70 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
     }
 
     private void migrateToFipsAlgorithm(byte[] decryptedPassword) {
+        // Work on a copy so the caller's array is not zeroed
+        byte[] copy = java.util.Arrays.copyOf(decryptedPassword, decryptedPassword.length);
         try {
             Resource configDir = getConfigDir();
             URL url = config.getURL();
 
-            // Create backup of the original encrypted file before migration
-            if ("file".equalsIgnoreCase(url.getProtocol())) {
-                File originalFile = URLs.urlToFile(url);
-                if (!originalFile.isAbsolute()) {
-                    // Relative path - backup within config dir
-                    Resource originalRes = configDir.get(originalFile.getPath());
-                    Resource backupRes = configDir.get(originalFile.getPath() + ".backup");
-                    if (originalRes.getType() == Type.RESOURCE) {
-                        try (InputStream in = originalRes.in();
-                             OutputStream out = backupRes.out()) {
-                            IOUtils.copy(in, out);
-                        }
-                        LOGGER.info("Created backup of master password file: " + backupRes.name());
-                    }
-                } else {
-                    // Absolute path - backup alongside original
-                    File backupFile = new File(originalFile.getPath() + ".backup");
-                    java.nio.file.Files.copy(
-                            originalFile.toPath(),
-                            backupFile.toPath(),
-                            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                    LOGGER.info("Created backup of master password file: " + backupFile.getPath());
-                }
+            if (!"file".equalsIgnoreCase(url.getProtocol())) {
+                LOGGER.info(
+                        "Master password is stored at a non-file URL; "
+                                + "automatic migration is not supported. "
+                                + "Re-save the master password via the admin UI to upgrade to FIPS-compatible encryption.");
+                return;
             }
 
-            // Re-encrypt with FIPS algorithm and save
-            char[] passwd = toChars(decryptedPassword);
-            try (OutputStream out = output(url, configDir)) {
-                out.write(encode(passwd));
+            File originalFile = URLs.urlToFile(url);
+
+            // Resolve the target file and its parent directory
+            File targetFile;
+            if (!originalFile.isAbsolute()) {
+                // Relative path — resolve within config dir
+                Resource res = configDir.get(originalFile.getPath());
+                targetFile = res.file(); // materializes the Resource to a java.io.File
+            } else {
+                targetFile = originalFile;
             }
-            scramble(passwd);
+            File parentDir = targetFile.getParentFile();
+
+            // Step 1: write new ciphertext to a temp file in the same directory (same filesystem)
+            File tmpFile = File.createTempFile("passwd", ".tmp", parentDir);
+            char[] passwd = toChars(copy);
+            try {
+                try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+                    fos.write(encode(passwd));
+                    fos.getFD().sync(); // fsync before rename
+                }
+            } finally {
+                scramble(passwd);
+            }
+
+            // Step 2: create backup of the original file
+            File backupFile = new File(targetFile.getPath() + ".backup");
+            java.nio.file.Files.copy(
+                    targetFile.toPath(),
+                    backupFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            LOGGER.info("Created backup of master password file: " + backupFile.getPath());
+
+            // Step 3: atomic rename of temp file over original (atomic on POSIX if same filesystem)
+            java.nio.file.Files.move(
+                    tmpFile.toPath(),
+                    targetFile.toPath(),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                    java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+
             LOGGER.info("Successfully migrated master password to FIPS-compatible encryption");
+        } catch (java.nio.file.AtomicMoveNotSupportedException amEx) {
+            LOGGER.warning(
+                    "Atomic rename not supported on this filesystem. "
+                            + "Master password migration skipped — re-save via admin UI to upgrade.");
         } catch (Exception e) {
             LOGGER.warning("Failed to migrate master password to FIPS algorithm: " + e.getMessage());
-            // Don't throw - we successfully decoded, migration is best-effort
+            // Don't throw — we successfully decoded, migration is best-effort
+        } finally {
+            java.util.Arrays.fill(copy, (byte) 0);
         }
     }
 

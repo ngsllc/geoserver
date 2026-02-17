@@ -212,58 +212,127 @@ For specific compliance requirements, consult your organization's security polic
 
 .. _fips_password_migration:
 
-Password Migration for FIPS
----------------------------
+Migrating an Existing Data Directory to OS-Level FIPS
+-----------------------------------------------------
 
-When running on a FIPS-enabled operating system (such as Rocky Linux 9 with FIPS mode enabled), the weak password encoder 
-(``pbePasswordEncoder``) that uses the ``PBEWITHMD5ANDDES`` algorithm is **not available** because MD5 and DES algorithms 
-are blocked at the OS level.
+When running on a FIPS-enabled operating system (such as RHEL 9, Rocky Linux 9, or Fedora with
+``fips-mode-setup --enable``), the JVM blocks non-FIPS algorithms at the provider level.
+GeoServer must complete its data-directory migration **before** OS-level FIPS is enforced,
+because some legacy formats (JCEKS keystore, ``PBEWithMD5AndDES`` master-password encryption)
+cannot be read once MD5 and DES are blocked.
 
 **Understanding Password Prefixes:**
 
-* ``crypt1:`` - Passwords encoded with weak ``PBEWITHMD5ANDDES`` algorithm (NOT FIPS-compliant)
-* ``crypt2:`` - Passwords encoded with strong ``PBEWITHSHA256AND256BITAES-BC`` algorithm (FIPS-compliant)
+* ``crypt1:`` — Passwords encoded with weak ``PBEWITHMD5ANDDES`` algorithm (NOT FIPS-compliant)
+* ``crypt2:`` — Passwords encoded with strong ``PBEWITHSHA256AND256BITAES-CBC-BC`` algorithm (FIPS-compliant)
 
-**Migration Steps (Recommended - Auto-Migration):**
+**What auto-migrates and what does not:**
 
-The simplest approach is to use GeoServer's automatic migration feature:
++-------------------------------+----------------+---------------------------------------------------+
+| Artifact                      | Auto-migrated? | Details                                           |
++===============================+================+===================================================+
+| Keystore (JCEKS → BCFKS)      | Yes            | Backup created, keys copied, old file removed     |
++-------------------------------+----------------+---------------------------------------------------+
+| Master password file          | Yes            | Re-encrypted from ``PBEWithMD5AndDES`` to          |
+|                               |                | ``PBEWithHmacSHA256AndAES_128``; atomic write      |
++-------------------------------+----------------+---------------------------------------------------+
+| ``crypt1:`` user/data-store   | **No**         | Must be re-entered via the web UI or REST API     |
+| passwords                     |                | after migration                                   |
++-------------------------------+----------------+---------------------------------------------------+
 
-1. **Temporarily disable OS-level FIPS** (e.g., remove ``fips=1`` from kernel parameters and reboot)
+Migration Steps (Recommended)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-2. **Set the FIPS_MODE environment variable**:
+1. **Disable OS-level FIPS** so the JVM can still load legacy algorithms:
 
    .. code-block:: bash
-   
+
+      # RHEL / Rocky Linux / Fedora
+      sudo fips-mode-setup --disable
+      sudo reboot
+
+      # Verify FIPS is off
+      cat /proc/sys/crypto/fips_enabled   # should print 0
+
+2. **Set the FIPS_MODE environment variable** and start GeoServer:
+
+   .. code-block:: bash
+
       export FIPS_MODE=true
+      ./bin/startup.sh          # or however you launch GeoServer
 
-3. **Restart GeoServer** - it will automatically:
-   
-   * Migrate the keystore from JCEKS to BCFKS format
-   * Create backups of existing files before migration
-   * Update password encoders to use FIPS-compliant algorithms
+   On startup GeoServer will:
 
-4. **Unset FIPS_MODE** (optional, since OS-level FIPS will take precedence):
+   * Register the BouncyCastle FIPS provider (BCFIPS)
+   * Detect the legacy JCEKS keystore and migrate it to BCFKS format
+   * Detect the legacy master-password encryption and re-encrypt with
+     ``PBEWithHmacSHA256AndAES_128``
+   * Log each migration step at INFO level
+
+3. **Re-enter any** ``crypt1:`` **passwords** through the GeoServer web admin:
+
+   * Data store connection passwords
+   * OGC service credentials
+   * Any other stored passwords showing the ``crypt1:`` prefix
+
+   Re-saving them while ``FIPS_MODE=true`` will encode them as ``crypt2:``.
+
+4. **Verify the migration** before re-enabling OS FIPS:
 
    .. code-block:: bash
-   
-      unset FIPS_MODE
 
-5. **Re-enable OS-level FIPS and reboot** - GeoServer will now run in FIPS mode using the migrated configuration
+      # Keystore should be BCFKS
+      ls <data-dir>/security/geoserver.bcfks
 
-**Manual Migration (Alternative):**
+      # No crypt1: references should remain in XML files
+      grep -r 'crypt1:' <data-dir>/
+
+   Check the GeoServer logs for:
+
+   .. code-block:: text
+
+      INFO  ... Master password was encrypted with legacy algorithm, migrating to FIPS-compatible algorithm
+      INFO  ... Keystore migrated from JCEKS to BCFKS
+
+5. **Stop GeoServer**, then **re-enable OS-level FIPS** and reboot:
+
+   .. code-block:: bash
+
+      ./bin/shutdown.sh
+      sudo fips-mode-setup --enable
+      sudo reboot
+
+      # Verify FIPS is on
+      cat /proc/sys/crypto/fips_enabled   # should print 1
+
+6. **Start GeoServer** — no ``FIPS_MODE`` variable is needed because OS-level FIPS
+   is detected automatically via ``/proc/sys/crypto/fips_enabled``:
+
+   .. code-block:: bash
+
+      ./bin/startup.sh
+
+   GeoServer will log:
+
+   .. code-block:: text
+
+      INFO  ... OS-level FIPS is enabled, FIPS mode activated
+
+Manual Migration (Alternative)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If you prefer manual control, you can update the security configuration directly:
 
 1. Edit ``<data-dir>/security/config.xml`` and change:
-   
+
    .. code-block:: xml
-   
+
       <configPasswordEncrypterName>pbePasswordEncoder</configPasswordEncrypterName>
-   
+
    To:
-   
+
    .. code-block:: xml
-   
+
       <configPasswordEncrypterName>strongPbePasswordEncoder</configPasswordEncrypterName>
 
 2. Re-encrypt existing passwords by re-saving data store connections through the GeoServer web UI.
@@ -274,4 +343,5 @@ If you prefer manual control, you can update the security configuration directly
 
 * New GeoServer data directories created in FIPS mode automatically use the strong password encoder
 * Attempting to use the weak password encoder in FIPS mode will result in a startup error
-* There is no automatic migration of ``crypt1:`` passwords - they must be re-entered 
+* The ``bc-fips`` and ``bcpkix-fips`` JARs **must** be on the classpath for FIPS mode to work
+* There is no automatic migration of ``crypt1:`` passwords — they must be re-entered

@@ -8,7 +8,6 @@ package org.geoserver.security.ldap;
 import com.unboundid.ldap.listener.InMemoryDirectoryServer;
 import com.unboundid.ldap.listener.InMemoryDirectoryServerConfig;
 import com.unboundid.ldap.listener.InMemoryListenerConfig;
-import com.unboundid.ldap.sdk.LDAPException;
 import com.unboundid.ldif.LDIFReader;
 import java.io.InputStream;
 import java.util.logging.Level;
@@ -20,8 +19,7 @@ import org.springframework.core.io.Resource;
 /**
  * UnboundID In-Memory LDAP server for testing. Replaces ApacheDS to avoid BouncyCastle dependency conflicts.
  *
- * @author "Mauro Bartolomeoli - mauro.bartolomeoli@geo-solutions.it"
- * @author Niels Charlier
+ * <p>Based on the original ApacheDS test server by Mauro Bartolomeoli and Niels Charlier.
  */
 public class UnboundIDLDAPTestServer {
     public static final int LDAP_SERVER_PORT = 10389;
@@ -40,7 +38,7 @@ public class UnboundIDLDAPTestServer {
      * @param port the port on which the server will be listening.
      * @param baseDN The base DN for the LDAP server.
      * @param ldifResource The LDIF file to load.
-     * @throws LDAPException if server cannot be started
+     * @throws Exception if server cannot be started
      */
     public static synchronized void startServer(int port, String baseDN, Resource ldifResource) throws Exception {
         if (server != null) {
@@ -89,15 +87,17 @@ public class UnboundIDLDAPTestServer {
     }
 
     /** Clear all data from the server. */
-    public static void clearData(String baseDN) throws Exception {
+    public static synchronized void clearData(String baseDN) throws Exception {
         if (server != null) {
             server.clear();
-            server.add("dn: " + baseDN, "objectClass: top", "objectClass: domain", "dc: example");
+            // Extract the leftmost RDN value (e.g. "example" from "dc=example,dc=com")
+            String dcValue = baseDN.split(",")[0].split("=")[1];
+            server.add("dn: " + baseDN, "objectClass: top", "objectClass: domain", "dc: " + dcValue);
         }
     }
 
     /** Reload LDIF data. */
-    public static void reloadData(Resource ldifResource) throws Exception {
+    public static synchronized void reloadData(Resource ldifResource) throws Exception {
         if (server != null && ldifResource != null && ldifResource.exists()) {
             server.clear();
             try (InputStream is = ldifResource.getInputStream();

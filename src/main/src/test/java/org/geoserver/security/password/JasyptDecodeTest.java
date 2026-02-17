@@ -5,6 +5,8 @@
 package org.geoserver.security.password;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.nio.charset.StandardCharsets;
@@ -23,20 +25,23 @@ public class JasyptDecodeTest {
     private static final String PASSWORD = "testpassword";
     private static final byte[] KEY = "geoserver".getBytes(StandardCharsets.UTF_8);
 
+    /**
+     * Verify that the bundled master password file can be decoded with Jasypt defaults
+     * (PBEWithMD5AndDES). If the file format or key changes, this test must be updated.
+     */
     @Test
     public void testDecodeActualTestData() throws Exception {
         // This is the actual password from src/web/app/src/main/webapp/data/security/masterpw/default/passwd
         String testDataPassword = "PNscY3AJUiCvPltKjaZ+KAg9bDHm1CNxfxIEUl0caSx/1hfOAXSeMyV7yD9cu0FM";
 
-        // Try with Jasypt default (no algorithm set)
+        // Try with Jasypt default (no algorithm set = PBEWithMD5AndDES)
         StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
         decryptor.setPassword(new String(KEY));
-        try {
-            byte[] decrypted = decryptor.decrypt(Base64.decodeBase64(testDataPassword));
-            LOGGER.log(Level.FINE, "Decoded test data: " + new String(decrypted, StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            LOGGER.log(Level.FINE, "Failed to decode with default: " + e.getClass().getSimpleName());
-        }
+        byte[] decrypted = decryptor.decrypt(Base64.decodeBase64(testDataPassword));
+        // The decrypted value should be a non-empty UTF-8 string
+        String decoded = new String(decrypted, StandardCharsets.UTF_8);
+        assertNotNull("Decoded value should not be null", decoded);
+        assertTrue("Decoded value should not be empty", decoded.length() > 0);
     }
 
     @Test

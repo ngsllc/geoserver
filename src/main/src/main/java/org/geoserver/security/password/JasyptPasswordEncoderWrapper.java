@@ -94,8 +94,8 @@ public class JasyptPasswordEncoderWrapper extends AbstractGeoserverPasswordEncod
             // Use FIPS-compatible digester instead of BasicPasswordEncryptor which uses SHA1PRNG
             StandardStringDigester digester = new StandardStringDigester();
             digester.setAlgorithm("SHA-256");
-            digester.setIterations(1000);
-            digester.setSaltSizeBytes(8);
+            digester.setIterations(100000);
+            digester.setSaltSizeBytes(16);
             digester.setSaltGenerator(new FipsRandomSaltGenerator());
             this.stringDigester = digester;
             this.useEncryptor = Boolean.FALSE;

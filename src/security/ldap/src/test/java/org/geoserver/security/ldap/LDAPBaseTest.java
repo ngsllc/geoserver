@@ -6,6 +6,7 @@
 package org.geoserver.security.ldap;
 
 import java.io.File;
+import org.apache.commons.io.FileUtils;
 import org.geoserver.config.GeoServerDataDirectory;
 import org.geoserver.platform.GeoServerResourceLoader;
 import org.geoserver.security.GeoServerSecurityManager;
@@ -73,7 +74,7 @@ public abstract class LDAPBaseTest {
 
     @After
     public void tearDown() throws Exception {
-        tempFolder.delete();
+        FileUtils.deleteDirectory(tempFolder);
 
         if (SecurityContextHolder.getContext() != null) {
             SecurityContextHolder.getContext().setAuthentication(null);
