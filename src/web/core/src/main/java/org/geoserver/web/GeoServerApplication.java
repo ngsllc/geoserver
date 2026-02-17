@@ -232,6 +232,13 @@ public class GeoServerApplication extends WebApplication
     @SuppressWarnings("deprecation")
     @Override
     protected void init() {
+        // Configure FIPS-compatible SecureRandom supplier for Wicket
+        // In Wicket 9.21.0, SecuritySettings constructor eagerly creates DefaultSecureRandomSupplier
+        // which uses SHA1PRNG - not available in FIPS mode. We use Unsafe to bypass the constructor
+        // and set a FIPS-compatible random supplier.
+        // TODO: Remove this workaround when upgrading to Wicket 9.23.0+ which includes fix for WICKET-7174
+        setSecuritySettings(FipsSecuritySettings.createForFipsMode());
+
         // enable GeoServer custom resource locators
         getResourceSettings().setUseMinifiedResources(false);
         getResourceSettings().setResourceStreamLocator(new GeoServerResourceStreamLocator());
