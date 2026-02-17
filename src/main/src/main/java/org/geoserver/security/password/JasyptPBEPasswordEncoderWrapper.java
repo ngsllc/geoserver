@@ -6,7 +6,6 @@ package org.geoserver.security.password;
 
 import java.util.Objects;
 import org.jasypt.encryption.pbe.PBEStringEncryptor;
-import org.jasypt.encryption.pbe.StandardPBEStringEncryptor;
 import org.jasypt.exceptions.EncryptionInitializationException;
 import org.jasypt.util.text.TextEncryptor;
 import org.springframework.dao.DataAccessException;
@@ -96,13 +95,10 @@ public class JasyptPBEPasswordEncoderWrapper extends AbstractGeoserverPasswordEn
 
     private synchronized void checkInitialization() {
         if (this.useTextEncryptor == null) {
-            // Use FIPS-compatible encryptor instead of BasicTextEncryptor which uses SHA1PRNG
-            StandardPBEStringEncryptor encryptor = new StandardPBEStringEncryptor();
-            encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
-            encryptor.setIvGenerator(new FipsRandomIvGenerator());
-            encryptor.setAlgorithm("PBEWithHmacSHA256AndAES_128");
-            this.pbeStringEncryptor = encryptor;
-            this.useTextEncryptor = Boolean.FALSE;
+            throw new EncryptionInitializationException(
+                    "PBE Password encoder not initialized: neither text encryptor "
+                            + "nor PBE string encryptor has been set. "
+                            + "Call setPbeStringEncryptor() or setTextEncryptor() before use.");
         } else if (this.useTextEncryptor) {
             if (this.textEncryptor == null) {
                 throw new EncryptionInitializationException(

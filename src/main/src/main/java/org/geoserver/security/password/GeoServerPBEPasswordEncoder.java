@@ -14,6 +14,9 @@ import java.security.Provider;
 import java.security.Security;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geoserver.security.KeyStoreProvider;
@@ -33,9 +36,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  */
 public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncoder {
 
+    private static final Logger LOGGER =
+            Logger.getLogger(GeoServerPBEPasswordEncoder.class.getName());
+
     /** Algorithms that are NOT FIPS-compliant and cannot be used when FIPS mode is enabled */
-    private static final java.util.Set<String> NON_FIPS_ALGORITHMS =
-            java.util.Set.of("PBEWITHMD5ANDDES", "PBEWITHMD5ANDTRIPLEDES", "PBEWITHSHA1ANDDES", "PBEWITHSHA1ANDDESEDE");
+    private static final Set<String> NON_FIPS_ALGORITHMS =
+            Set.of("PBEWITHMD5ANDDES", "PBEWITHMD5ANDTRIPLEDES", "PBEWITHSHA1ANDDES", "PBEWITHSHA1ANDDESEDE");
 
     StandardPBEStringEncryptor stringEncrypter;
     StandardPBEByteEncryptor byteEncrypter;
@@ -121,15 +127,19 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
         String passwordString = Base64.getEncoder().encodeToString(password);
         char[] chars = passwordString.toCharArray();
 
-        byteEncrypter = new StandardPBEByteEncryptor();
-        byteEncrypter.setPasswordCharArray(chars);
-        // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
-        byteEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
-        byteEncrypter.setIvGenerator(new FipsRandomIvGenerator());
-        ensureProviderAvailableIfRequested();
-        if (getProviderName() != null && !getProviderName().isEmpty()) byteEncrypter.setProviderName(getProviderName());
-        byteEncrypter.setAlgorithm(getAlgorithm());
+        try {
+            byteEncrypter = new StandardPBEByteEncryptor();
+            byteEncrypter.setPasswordCharArray(chars);
+            // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+            byteEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+            byteEncrypter.setIvGenerator(new FipsRandomIvGenerator());
+            ensureProviderAvailableIfRequested();
+            if (getProviderName() != null && !getProviderName().isEmpty())
+                byteEncrypter.setProviderName(getProviderName());
+            byteEncrypter.setAlgorithm(getAlgorithm());
 
+        // Return the encoder; the finally block below scrambles password/chars.
+        // This is safe because Jasypt's setPasswordCharArray() copies the array internally.
         return new CharArrayPasswordEncoder() {
             @Override
             public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
@@ -155,6 +165,10 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
                 }
             }
         };
+        } finally {
+            scramble(password);
+            scramble(chars);
+        }
     }
 
     /**
@@ -173,8 +187,17 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
                         (Provider) providerClass.getDeclaredConstructor().newInstance());
             }
             // Note: Regular BC provider is not shipped with GeoServer; only BC-FIPS is available
-        } catch (ReflectiveOperationException | SecurityException ignored) {
-            // If provider cannot be registered, jasypt will try default provider; acceptable fallback
+        } catch (ReflectiveOperationException | SecurityException e) {
+            // In FIPS mode this is a real problem — the algorithm will likely fail downstream.
+            // In non-FIPS mode it's acceptable to fall back to default providers.
+            if (KeyStoreProviderImpl.isFipsMode()) {
+                LOGGER.log(Level.WARNING,
+                        "Failed to register requested security provider '" + requested
+                                + "' in FIPS mode. Encryption operations may fail: " + e.getMessage());
+            } else {
+                LOGGER.log(Level.FINE,
+                        "Provider '" + requested + "' not available, falling back to default JCA providers");
+            }
         }
     }
 

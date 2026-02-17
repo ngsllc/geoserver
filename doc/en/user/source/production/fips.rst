@@ -36,12 +36,12 @@ Set the FIPS_MODE environment variable before starting GeoServer:
    # Or using system property
    java -DFIPS_MODE=true -jar geoserver.war
 
-When `FIPS_MODE=true`, GeoServer automatically:
+When ``FIPS_MODE=true``, GeoServer automatically:
 - Uses BCFKS keystore format (FIPS-compliant)
 - Registers BouncyCastle FIPS provider (BCFIPS)
 - Enforces FIPS-approved cryptographic algorithms
 
-When `FIPS_MODE=false` or unset, GeoServer uses:
+When ``FIPS_MODE=false`` or unset, GeoServer uses:
 - JCEKS keystore format (traditional Java keystore)
 - Standard Java cryptographic providers
 
@@ -78,7 +78,7 @@ GeoServer includes BC-FIPS libraries by default in all builds:
    mvn clean install
 
 **What's Included:**
-* ✅ BC-FIPS libraries for FIPS 140-2 compliance
+* ✅ BC-FIPS libraries for FIPS 140-3 compliance
 * ✅ BCFKS keystore support for FIPS mode
 * ✅ JCEKS keystore support for non-FIPS mode
 * ✅ Automatic provider and keystore selection based on ``FIPS_MODE``
@@ -113,9 +113,9 @@ BCFKS (BouncyCastle FIPS KeyStore)
 Used automatically when ``FIPS_MODE=true``:
 
 - **Format**: BCFKS (BouncyCastle FIPS KeyStore)
-- **Provider**: BCFIPS (or BC as fallback)
+- **Provider**: BCFIPS
 - **File**: ``geoserver.bcfks``
-- **Compliance**: FIPS 140-2 compliant
+- **Compliance**: FIPS 140-3 compliant
 
 JCEKS (Java Cryptography Extension KeyStore)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -268,6 +268,24 @@ Examples:
    # Default (FIPS disabled, only works on non-FIPS OS)
    java -jar geoserver.war
 
+Migrating an Existing Deployment to OS-Level FIPS
+-------------------------------------------------
+
+If you have an existing GeoServer data directory that was created without FIPS mode
+(e.g., JCEKS keystore, ``PBEWithMD5AndDES``-encrypted master password, ``crypt1:`` passwords),
+you must migrate it **before** enabling OS-level FIPS. Once the OS enforces FIPS, the JVM
+blocks MD5 and DES entirely, making the legacy artifacts unreadable.
+
+See :ref:`fips_password_migration` in the Security section for the full step-by-step procedure.
+The short version:
+
+1. Disable OS-level FIPS (``sudo fips-mode-setup --disable && sudo reboot``)
+2. ``export FIPS_MODE=true`` and start GeoServer — auto-migrates keystore and master password
+3. Re-enter any ``crypt1:`` passwords via the web UI (they become ``crypt2:``)
+4. Verify: ``geoserver.bcfks`` exists, ``grep -r 'crypt1:' <data-dir>/`` returns nothing
+5. Stop GeoServer, re-enable OS-level FIPS (``sudo fips-mode-setup --enable && sudo reboot``)
+6. Start GeoServer — FIPS mode activates automatically via ``/proc/sys/crypto/fips_enabled``
+
 Security Considerations
 ----------------------
 
@@ -291,6 +309,12 @@ Check that the environment variables are set correctly and that the BouncyCastle
 
 Ensure that the source keystore password is correct and that the target directory is writable. The target keystore will be created automatically if it doesn't exist.
 
+**Master password cannot be decrypted in FIPS mode**
+
+If GeoServer fails to start with ``Failed to decrypt master password in FIPS mode``, the master
+password file is still encrypted with the legacy ``PBEWithMD5AndDES`` algorithm. Follow the
+:ref:`migration procedure <fips_password_migration>` to re-encrypt it before enabling OS-level FIPS.
+
 **Provider not found errors**
 
 Verify that the BouncyCastle FIPS JAR files (bc-fips.jar, bcpkix-fips.jar) are in the classpath and that regular BouncyCastle providers (bcprov.jar, bcpkix.jar) are not also present.
@@ -302,6 +326,12 @@ If you see ``java.lang.SecurityException: sealing violation`` errors, this indic
 **Keystore access denied**
 
 Check file permissions and ensure the GeoServer process has read/write access to keystore files.
+
+**crypt1: passwords fail after enabling FIPS**
+
+Passwords prefixed with ``crypt1:`` use the ``PBEWITHMD5ANDDES`` algorithm which is blocked in
+FIPS mode. These passwords are **not** auto-migrated. Re-enter them through the GeoServer web
+admin (they will be re-saved as ``crypt2:``).
 
 Log Analysis
 ~~~~~~~~~~~
