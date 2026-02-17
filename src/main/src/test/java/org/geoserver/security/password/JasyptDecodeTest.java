@@ -8,12 +8,17 @@ import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.fail;
 
 import java.nio.charset.StandardCharsets;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
+import org.geotools.util.logging.Logging;
 import org.junit.Test;
 
 /** Test to verify Jasypt decryption behavior with different algorithm configurations. */
 public class JasyptDecodeTest {
+
+    private static final Logger LOGGER = Logging.getLogger(JasyptDecodeTest.class);
 
     private static final String PASSWORD = "testpassword";
     private static final byte[] KEY = "geoserver".getBytes(StandardCharsets.UTF_8);
@@ -28,9 +33,9 @@ public class JasyptDecodeTest {
         decryptor.setPassword(new String(KEY));
         try {
             byte[] decrypted = decryptor.decrypt(Base64.decodeBase64(testDataPassword));
-            System.out.println("Decoded test data: " + new String(decrypted, StandardCharsets.UTF_8));
+            LOGGER.log(Level.FINE, "Decoded test data: " + new String(decrypted, StandardCharsets.UTF_8));
         } catch (Exception e) {
-            System.out.println("Failed to decode with default: " + e.getClass().getSimpleName());
+            LOGGER.log(Level.FINE, "Failed to decode with default: " + e.getClass().getSimpleName());
         }
     }
 
@@ -41,7 +46,7 @@ public class JasyptDecodeTest {
         encryptor.setPassword(new String(KEY));
         byte[] encrypted = encryptor.encrypt(PASSWORD.getBytes(StandardCharsets.UTF_8));
         String encoded = Base64.encodeBase64String(encrypted);
-        System.out.println("Encoded with default: " + encoded);
+        LOGGER.log(Level.FINE, "Encoded with default: " + encoded);
 
         // Decode with default algorithm
         StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
@@ -60,7 +65,7 @@ public class JasyptDecodeTest {
         encryptor.setPassword(new String(KEY));
         byte[] encrypted = encryptor.encrypt(PASSWORD.getBytes(StandardCharsets.UTF_8));
         String encoded = Base64.encodeBase64String(encrypted);
-        System.out.println("Encoded with FIPS: " + encoded);
+        LOGGER.log(Level.FINE, "Encoded with FIPS: " + encoded);
 
         // Decode with FIPS algorithm - also needs salt/IV generators set
         StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
@@ -79,7 +84,7 @@ public class JasyptDecodeTest {
         encryptor.setPassword(new String(KEY));
         byte[] encrypted = encryptor.encrypt(PASSWORD.getBytes(StandardCharsets.UTF_8));
         String encoded = Base64.encodeBase64String(encrypted);
-        System.out.println("Legacy encoded: " + encoded);
+        LOGGER.log(Level.FINE, "Legacy encoded: " + encoded);
 
         // Try to decode with FIPS algorithm first (should fail)
         try {
@@ -89,7 +94,7 @@ public class JasyptDecodeTest {
             decryptor.decrypt(Base64.decodeBase64(encoded));
             fail("Should have failed to decode with FIPS algorithm");
         } catch (Exception e) {
-            System.out.println("Expected failure with FIPS: " + e.getClass().getSimpleName());
+            LOGGER.log(Level.FINE, "Expected failure with FIPS: " + e.getClass().getSimpleName());
         }
 
         // Decode with default (no algorithm set) - should work

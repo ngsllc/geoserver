@@ -48,7 +48,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
     @Before
     public void saveOriginalFipsMode() {
         originalFipsMode = System.getProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
-        LOGGER.log(Level.INFO, "Original FIPS mode setting: " + originalFipsMode);
+        LOGGER.log(Level.FINE, "Original FIPS mode setting: " + originalFipsMode);
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
     }
 
@@ -61,17 +61,17 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         }
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
         getSecurityManager().getKeyStoreProvider().reloadKeyStore();
-        LOGGER.log(Level.INFO, "Restored FIPS mode to: " + originalFipsMode);
+        LOGGER.log(Level.FINE, "Restored FIPS mode to: " + originalFipsMode);
     }
 
-    /** Test that keystore type is always BCFKS regardless of FIPS mode. */
+    /** Test that keystore type changes based on FIPS mode: BCFKS for FIPS, JCEKS for non-FIPS. */
     @Test
     public void testKeystoreTypeChangesWithFipsMode() throws Exception {
-        LOGGER.info("=== Test: Keystore type is always BCFKS ===");
+        LOGGER.fine("=== Test: Keystore type changes with FIPS mode ===");
 
-        // Non-FIPS mode should still use BCFKS
+        // Non-FIPS mode should use JCEKS
         setFipsMode(false);
-        assertEquals("Non-FIPS mode should use BCFKS", "BCFKS", KeyStoreProviderImpl.getKeyStoreType());
+        assertEquals("Non-FIPS mode should use JCEKS", "JCEKS", KeyStoreProviderImpl.getKeyStoreType());
         assertFalse("isFipsMode() should return false", KeyStoreProviderImpl.isFipsMode());
 
         // FIPS mode uses BCFKS
@@ -79,18 +79,18 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertEquals("FIPS mode should use BCFKS", "BCFKS", KeyStoreProviderImpl.getKeyStoreType());
         assertTrue("isFipsMode() should return true", KeyStoreProviderImpl.isFipsMode());
 
-        // Back to non-FIPS mode, still BCFKS
+        // Back to non-FIPS mode, should use JCEKS
         setFipsMode(false);
-        assertEquals("Non-FIPS mode should use BCFKS", "BCFKS", KeyStoreProviderImpl.getKeyStoreType());
+        assertEquals("Non-FIPS mode should use JCEKS", "JCEKS", KeyStoreProviderImpl.getKeyStoreType());
         assertFalse("isFipsMode() should return false", KeyStoreProviderImpl.isFipsMode());
 
-        LOGGER.info("Test passed: Keystore type is always BCFKS");
+        LOGGER.fine("Test passed: Keystore type changes with FIPS mode");
     }
 
     /** Test that secret keys are preserved when switching between FIPS and non-FIPS modes. */
     @Test
     public void testSecretKeyPreservationAcrossModeSwitch() throws Exception {
-        LOGGER.info("=== Test: Secret key preservation across mode switch ===");
+        LOGGER.fine("=== Test: Secret key preservation across mode switch ===");
         deleteKeystoreFiles();
 
         // Step 1: Start in non-FIPS mode and store a secret
@@ -105,7 +105,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         SecretKey originalKey = ksp.getSecretKey(TEST_SECRET_ALIAS);
         assertNotNull("Original key should not be null", originalKey);
         byte[] originalKeyBytes = originalKey.getEncoded();
-        LOGGER.info("Stored secret in JCEKS keystore");
+        LOGGER.fine("Stored secret in JCEKS keystore");
 
         // Step 2: Switch to FIPS mode
         setFipsMode(true);
@@ -115,7 +115,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertTrue("Secret should exist after FIPS switch", ksp.containsAlias(TEST_SECRET_ALIAS));
         SecretKey fipsKey = ksp.getSecretKey(TEST_SECRET_ALIAS);
         assertNotNull("FIPS key should not be null", fipsKey);
-        LOGGER.info("Secret preserved after switching to BCFKS");
+        LOGGER.fine("Secret preserved after switching to BCFKS");
 
         // Step 3: Switch back to non-FIPS mode
         setFipsMode(false);
@@ -125,15 +125,15 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertTrue("Secret should exist after switching back", ksp.containsAlias(TEST_SECRET_ALIAS));
         SecretKey restoredKey = ksp.getSecretKey(TEST_SECRET_ALIAS);
         assertNotNull("Restored key should not be null", restoredKey);
-        LOGGER.info("Secret preserved after switching back to JCEKS");
+        LOGGER.fine("Secret preserved after switching back to JCEKS");
 
-        LOGGER.info("Test passed: Secret keys preserved across mode switches");
+        LOGGER.fine("Test passed: Secret keys preserved across mode switches");
     }
 
     /** Test that password encoders are correctly available based on FIPS mode. */
     @Test
     public void testPasswordEncoderAvailabilityInFipsMode() throws Exception {
-        LOGGER.info("=== Test: Password encoder availability in FIPS mode ===");
+        LOGGER.fine("=== Test: Password encoder availability in FIPS mode ===");
 
         // In non-FIPS mode, all encoders should be available
         setFipsMode(false);
@@ -158,13 +158,13 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertNotNull("Encoded password should not be null", encoded);
         assertTrue("Password should verify correctly", digestEncoder.isPasswordValid(encoded, TEST_PASSWORD, null));
 
-        LOGGER.info("Test passed: Password encoders work correctly in FIPS mode");
+        LOGGER.fine("Test passed: Password encoders work correctly in FIPS mode");
     }
 
     /** Test multiple rapid switches between FIPS and non-FIPS modes. */
     @Test
     public void testMultipleRapidModeSwitches() throws Exception {
-        LOGGER.info("=== Test: Multiple rapid mode switches ===");
+        LOGGER.fine("=== Test: Multiple rapid mode switches ===");
         deleteKeystoreFiles();
 
         // Store a secret
@@ -176,7 +176,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
 
         // Perform multiple rapid switches
         for (int i = 0; i < 3; i++) {
-            LOGGER.info("Rapid switch iteration " + (i + 1));
+            LOGGER.fine("Rapid switch iteration " + (i + 1));
 
             // Switch to FIPS
             setFipsMode(true);
@@ -193,13 +193,13 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
             assertTrue("Secret should exist in non-FIPS mode", ksp.containsAlias(TEST_SECRET_ALIAS));
         }
 
-        LOGGER.info("Test passed: Multiple rapid mode switches handled correctly");
+        LOGGER.fine("Test passed: Multiple rapid mode switches handled correctly");
     }
 
     /** Test that backup files are created during migration. */
     @Test
     public void testBackupFileCreationDuringMigration() throws Exception {
-        LOGGER.info("=== Test: Backup file creation during migration ===");
+        LOGGER.fine("=== Test: Backup file creation during migration ===");
         deleteKeystoreFiles();
 
         // Create a keystore in non-FIPS mode
@@ -222,13 +222,13 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
                 "BCFKS file should exist after migration",
                 securityDir.get("geoserver.bcfks").getType() == Resource.Type.RESOURCE);
 
-        LOGGER.info("Test passed: Migration creates proper keystore files");
+        LOGGER.fine("Test passed: Migration creates proper keystore files");
     }
 
     /** Test system property takes precedence over environment variable. */
     @Test
     public void testSystemPropertyPrecedence() throws Exception {
-        LOGGER.info("=== Test: System property precedence ===");
+        LOGGER.fine("=== Test: System property precedence ===");
 
         // Set system property to true
         System.setProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR, "true");
@@ -242,7 +242,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertFalse("FIPS mode should be disabled via system property", KeyStoreProviderImpl.isFipsMode());
         assertEquals("JCEKS", KeyStoreProviderImpl.getKeyStoreType());
 
-        LOGGER.info("Test passed: System property precedence works correctly");
+        LOGGER.fine("Test passed: System property precedence works correctly");
     }
 
     // Helper methods
@@ -254,7 +254,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
             System.setProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR, "false");
         }
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
-        LOGGER.info("Set FIPS mode to: " + enabled);
+        LOGGER.fine("Set FIPS mode to: " + enabled);
     }
 
     private void deleteKeystoreFiles() throws Exception {
@@ -265,7 +265,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         deleteIfExists(securityDir.get("geoserver.jceks.backup"));
         deleteIfExists(securityDir.get("geoserver.bcfks.backup"));
 
-        LOGGER.info("Cleaned up keystore files");
+        LOGGER.fine("Cleaned up keystore files");
     }
 
     private void deleteIfExists(Resource resource) {

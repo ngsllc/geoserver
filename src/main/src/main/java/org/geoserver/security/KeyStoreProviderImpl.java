@@ -66,8 +66,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
 
     protected static Logger LOGGER = Logging.getLogger("org.geoserver.security");
     protected String name;
-    protected Resource keyStoreResource;
-    protected KeyStore ks;
+    protected volatile Resource keyStoreResource;
+    protected volatile KeyStore ks;
 
     GeoServerSecurityManager securityManager;
 
@@ -180,13 +180,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      * Infer keystore type from the file path extension, falling back to the provided default type. Recognized
      * extensions: .jceks, .jks, .bcfks
      */
-    private static final java.util.Map<String, String> EXTENSION_TO_TYPE_MAP = new java.util.HashMap<>();
-
-    static {
-        EXTENSION_TO_TYPE_MAP.put(".jceks", "JCEKS");
-        EXTENSION_TO_TYPE_MAP.put(".jks", "JKS");
-        EXTENSION_TO_TYPE_MAP.put(".bcfks", "BCFKS");
-    }
+    private static final java.util.Map<String, String> EXTENSION_TO_TYPE_MAP =
+            java.util.Map.of(".jceks", "JCEKS", ".jks", "JKS", ".bcfks", "BCFKS");
 
     private static String inferTypeFromPathOrDefault(String filePath, String defaultType) {
         if (filePath == null) return defaultType;
@@ -325,79 +320,33 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         while (aliases.hasMoreElements()) {
             String alias = aliases.nextElement();
             if (source.isKeyEntry(alias)) {
-                System.out.println("[KEYSTORE-MIGRATION] Processing key alias: '" + alias + "'");
-                LOGGER.log(Level.INFO, "Processing key alias: '" + alias + "'");
+                LOGGER.log(Level.FINE, "Processing key alias: '" + alias + "'");
                 Key key = source.getKey(alias, password);
-                System.out.println("[KEYSTORE-MIGRATION] Retrieved key for '" + alias + "', class: "
-                        + key.getClass().getName());
-                LOGGER.log(
-                        Level.INFO,
-                        "Retrieved key for '" + alias + "', class: "
-                                + key.getClass().getName());
 
                 // Always normalize SecretKeys to SecretKeySpec for cross-keystore compatibility
                 // JCEKS needs this to avoid serialization filter issues
                 // BCFKS needs this because it can't store PBE-wrapped keys
                 if (key instanceof SecretKey) {
-                    System.out.println(
-                            "[KEYSTORE-MIGRATION] Key '" + alias + "' is SecretKey, attempting normalization");
-                    LOGGER.log(Level.INFO, "Key '" + alias + "' is SecretKey, attempting normalization");
-                    String originalClass = key.getClass().getName();
-                    String originalFormat = key.getFormat();
-                    System.out.println(
-                            "[KEYSTORE-MIGRATION] Original class: " + originalClass + ", format: " + originalFormat);
-                    LOGGER.log(Level.INFO, "Original class: " + originalClass + ", format: " + originalFormat);
-
                     byte[] encoded = key.getEncoded();
-                    System.out.println("[KEYSTORE-MIGRATION] getEncoded() result: "
-                            + (encoded == null ? "NULL" : encoded.length + " bytes"));
-                    LOGGER.log(
-                            Level.INFO,
-                            "getEncoded() for '" + alias + "': "
-                                    + (encoded == null ? "NULL" : encoded.length + " bytes"));
-
                     if (encoded != null) {
                         // For BCFKS in FIPS mode, we must use a FIPS-approved algorithm name
                         // BCFKS rejects keys with PBE algorithm names like "PBEWithMD5AndDES"
                         String targetAlgorithm = key.getAlgorithm();
                         if ("BCFKS".equals(target.getType()) && !isFipsApprovedAlgorithm(targetAlgorithm)) {
                             targetAlgorithm = DEFAULT_SECRET_KEY_ALGORITHM; // Use AES
-                            System.out.println("[KEYSTORE-MIGRATION] Changing algorithm from " + key.getAlgorithm()
-                                    + " to " + targetAlgorithm + " for BCFKS compatibility");
                         }
                         key = new SecretKeySpec(encoded, targetAlgorithm);
-                        System.out.println("[KEYSTORE-MIGRATION] Successfully normalized key '" + alias + "'");
-                        LOGGER.log(
-                                Level.INFO,
-                                "Normalized key '" + alias + "' from " + originalClass + " (format: " + originalFormat
-                                        + ") to SecretKeySpec with algorithm " + targetAlgorithm);
+                        LOGGER.log(Level.FINE, "Normalized key '" + alias + "' to SecretKeySpec with algorithm " + targetAlgorithm);
                     } else {
-                        System.out.println(
-                                "[KEYSTORE-MIGRATION] ERROR: getEncoded() returned NULL for '" + alias + "'");
                         LOGGER.log(
                                 Level.SEVERE,
-                                "Cannot normalize key '" + alias + "' - getEncoded() returned null. " + "Key class: "
-                                        + originalClass + ", format: " + originalFormat
-                                        + ". This key cannot be migrated to BCFKS.");
+                                "Cannot normalize key '" + alias + "' - getEncoded() returned null.");
                         throw new Exception("Cannot migrate key '" + alias + "' - key encoding is not available");
                     }
-                } else {
-                    System.out.println("[KEYSTORE-MIGRATION] Key '" + alias + "' is NOT SecretKey");
-                    LOGGER.log(
-                            Level.INFO,
-                            "Key '" + alias + "' is NOT SecretKey, type: "
-                                    + key.getClass().getName());
                 }
 
                 java.security.cert.Certificate[] chain = source.getCertificateChain(alias);
-                System.out.println("[KEYSTORE-MIGRATION] About to call setKeyEntry for '" + alias + "'");
-                LOGGER.log(Level.INFO, "About to call setKeyEntry for '" + alias + "'");
-
-                // Store the key in the target keystore
-                // For BCFKS, keys must have FIPS-approved algorithms (handled in normalization above)
                 target.setKeyEntry(alias, key, password, chain);
-
-                System.out.println("[KEYSTORE-MIGRATION] Successfully copied key '" + alias + "'");
                 LOGGER.log(Level.FINE, "Copied key during migration: " + alias);
             }
         }
@@ -639,7 +588,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             }
 
             LOGGER.log(
-                    Level.INFO,
+                    Level.FINE,
                     "KeyStore path: " + resourcePath + ", keystoreType: " + keystoreType + ", effectiveType: "
                             + effectiveType);
 
@@ -663,12 +612,11 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     throw new IOException("Cannot migrate JCEKS keystore when OS-level FIPS mode is enabled.\n\n"
                             + "JCEKS keystores are not available in OS FIPS mode.\n\n"
                             + "To migrate your keystore:\n"
-                            + "1. Disable OS FIPS mode temporarily: make disable && make reboot\n"
-                            + "2. Set FIPS_MODE=true environment variable in /etc/systemd/system/geoserver.service\n"
-                            + "3. Restart GeoServer - it will auto-migrate JCEKS → BCFKS\n"
-                            + "4. Remove FIPS_MODE variable from service file\n"
-                            + "5. Enable OS FIPS mode: make enable && make reboot\n"
-                            + "6. Start GeoServer - will use BCFKS in full FIPS mode\n\n"
+                            + "1. Temporarily disable OS FIPS mode\n"
+                            + "2. Set the FIPS_MODE=true environment variable for GeoServer\n"
+                            + "3. Restart GeoServer — it will auto-migrate JCEKS to BCFKS\n"
+                            + "4. Remove the FIPS_MODE variable\n"
+                            + "5. Re-enable OS FIPS mode and restart\n\n"
                             + "Alternative: Delete " + getResource().path() + " to start fresh with BCFKS.");
                 }
 
@@ -682,7 +630,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                                 oldResource.file().toPath(),
                                 backupResource.file().toPath(),
                                 java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                        LOGGER.log(Level.INFO, "Created backup: " + backupResource.name());
+                        LOGGER.log(Level.FINE, "Created backup: " + backupResource.name());
                     } catch (Exception e) {
                         LOGGER.log(Level.WARNING, "Failed to create backup before migration: " + e.getMessage(), e);
                         // Continue without backup
@@ -693,15 +641,12 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 // Load the old keystore with its correct provider
                 KeyStore oldKs = createKeyStore(effectiveType, getKeyStoreProviderForType(effectiveType));
                 LOGGER.log(
-                        Level.INFO,
+                        Level.FINE,
                         "Created old keystore instance: type=" + oldKs.getType() + ", provider="
                                 + oldKs.getProvider().getName());
                 try (InputStream fis = getResource().in()) {
-                    LOGGER.log(
-                            Level.INFO,
-                            "Loading old keystore from: " + getResource().path());
                     oldKs.load(fis, passwd);
-                    LOGGER.log(Level.INFO, "Successfully loaded old keystore, aliases count: " + oldKs.size());
+                    LOGGER.log(Level.FINE, "Loaded old keystore, aliases count: " + oldKs.size());
                 } catch (Exception e) {
                     LOGGER.log(
                             Level.SEVERE,
@@ -726,7 +671,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     try (OutputStream fos = newResource.out()) {
                         ks.store(fos, passwd);
                     }
-                    LOGGER.log(Level.INFO, "Successfully wrote new keystore: " + newResource.name());
+                    LOGGER.log(Level.FINE, "Wrote new keystore: " + newResource.name());
                 } catch (Exception e) {
                     LOGGER.log(Level.SEVERE, "Failed to write new keystore, attempting rollback: " + e.getMessage(), e);
 
@@ -737,7 +682,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                                     backupResource.file().toPath(),
                                     oldResource.file().toPath(),
                                     java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-                            LOGGER.log(Level.INFO, "Rollback successful: restored from backup");
+                            LOGGER.log(Level.FINE, "Rollback successful: restored from backup");
                         } catch (Exception rollbackEx) {
                             LOGGER.log(Level.SEVERE, "Rollback failed: " + rollbackEx.getMessage(), rollbackEx);
                         }
@@ -745,21 +690,10 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     throw new IOException("Keystore migration failed", e);
                 }
 
-                // Keep old keystore file as backup for rollback (don't delete)
-                // The backup was already created above, so just log that it's preserved
-                if (!oldResource.path().equals(newResource.path()) && oldResource.getType() != Type.UNDEFINED) {
-                    LOGGER.log(Level.INFO, "Old keystore preserved as backup: " + backupResource.name());
-                }
-
-                // Keep backup for manual rollback - don't delete it
-                if (backupResource != null && backupResource.getType() != Type.UNDEFINED) {
-                    LOGGER.log(Level.INFO, "Backup file preserved for rollback: " + backupResource.name());
-                }
-
                 // Update the cached resource to point to the new file
                 keyStoreResource = newResource;
 
-                LOGGER.log(Level.INFO, "Keystore migration completed successfully to: " + newResource.name());
+                LOGGER.log(Level.INFO, "Keystore migration completed: " + effectiveType + " -> " + keystoreType);
             } else {
                 // Type matches, load existing keystore
                 String provider = getKeyStoreProviderForType(effectiveType);
@@ -767,8 +701,6 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 try (InputStream fis = getResource().in()) {
                     ks.load(fis, passwd);
                 }
-                // Ensure initial keys are present in case the keystore was created without them
-                // ensureInitialKeys();
             }
         } catch (Exception ex) {
             if (ex instanceof IOException exception) // avoid useless wrapping
@@ -816,24 +748,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     @Override
     public void setSecretKey(String alias, char[] key) throws IOException {
         assertActivatedKeyStore();
-        // Use SHA-256 hash of the password to get a valid AES key length (32 bytes)
-        byte[] keyBytes = toBytes(key);
-        try {
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            keyBytes = digest.digest(keyBytes);
-        } catch (java.security.NoSuchAlgorithmException e) {
-            // Fallback to truncating/padding to 32 bytes
-            if (keyBytes.length > 32) {
-                byte[] truncated = new byte[32];
-                System.arraycopy(keyBytes, 0, truncated, 0, 32);
-                keyBytes = truncated;
-            } else if (keyBytes.length < 32) {
-                byte[] padded = new byte[32];
-                System.arraycopy(keyBytes, 0, padded, 0, keyBytes.length);
-                keyBytes = padded;
-            }
-        }
-        SecretKey mySecretKey = new SecretKeySpec(keyBytes, DEFAULT_SECRET_KEY_ALGORITHM);
+        SecretKey mySecretKey = deriveAesKey(toBytes(key));
         KeyStore.SecretKeyEntry skEntry = new KeyStore.SecretKeyEntry(mySecretKey);
         char[] passwd = securityManager.getMasterPassword();
         try {
@@ -887,19 +802,16 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         }
     }
 
-    /** Creates initial key entries auto generated keys {@link #CONFIGPASSWORDKEY} */
-    protected void addInitialKeys() throws IOException {
-        // TODO:scramble
-        RandomPasswordProvider randPasswdProvider = getSecurityManager().getRandomPassworddProvider();
-
-        char[] configKey = randPasswdProvider.getRandomPasswordWithDefaultLength();
-        // Use SHA-256 hash of the password to get a valid AES key length (32 bytes)
-        byte[] keyBytes = toBytes(configKey);
+    /**
+     * Derives a 32-byte AES {@link SecretKey} from raw key material using SHA-256.
+     * Falls back to truncation/padding if SHA-256 is unavailable.
+     */
+    private static SecretKey deriveAesKey(byte[] rawKeyBytes) {
+        byte[] keyBytes = rawKeyBytes;
         try {
             java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
             keyBytes = digest.digest(keyBytes);
         } catch (java.security.NoSuchAlgorithmException e) {
-            // Fallback to truncating to 32 bytes
             if (keyBytes.length > 32) {
                 byte[] truncated = new byte[32];
                 System.arraycopy(keyBytes, 0, truncated, 0, 32);
@@ -910,7 +822,16 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 keyBytes = padded;
             }
         }
-        SecretKey mySecretKey = new SecretKeySpec(keyBytes, DEFAULT_SECRET_KEY_ALGORITHM);
+        return new SecretKeySpec(keyBytes, DEFAULT_SECRET_KEY_ALGORITHM);
+    }
+
+    /** Creates initial key entries auto generated keys {@link #CONFIGPASSWORDKEY} */
+    protected void addInitialKeys() throws IOException {
+        // TODO:scramble
+        RandomPasswordProvider randPasswdProvider = getSecurityManager().getRandomPassworddProvider();
+
+        char[] configKey = randPasswdProvider.getRandomPasswordWithDefaultLength();
+        SecretKey mySecretKey = deriveAesKey(toBytes(configKey));
         KeyStore.SecretKeyEntry skEntry = new KeyStore.SecretKeyEntry(mySecretKey);
         char[] passwd = securityManager.getMasterPassword();
         try {
@@ -922,6 +843,9 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         }
     }
 
+    /** Flag to prevent recursive keystore recreation in ensureInitialKeys */
+    private boolean recreatingKeyStore = false;
+
     /** Ensures initial keys are present, adding them if missing */
     protected void ensureInitialKeys() throws IOException {
         try {
@@ -932,7 +856,11 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             }
         } catch (KeyStoreException | IOException e) {
             // If we can't add the key (perhaps due to keystore type mismatch), recreate the keystore
+            if (recreatingKeyStore) {
+                throw new IOException("Recursive keystore recreation detected — aborting", e);
+            }
             LOGGER.log(Level.WARNING, "Failed to add initial keys to existing keystore, recreating: " + e.getMessage());
+            recreatingKeyStore = true;
             try {
                 // Delete the existing keystore
                 Resource keystoreResource = getResource();
@@ -946,6 +874,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             } catch (Exception e2) {
                 LOGGER.log(Level.SEVERE, "Failed to recreate keystore: " + e2.getMessage(), e2);
                 throw new IOException("Failed to initialize keystore", e2);
+            } finally {
+                recreatingKeyStore = false;
             }
         }
     }
@@ -984,7 +914,13 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 String alias = enumeration.nextElement();
                 Key key = oldKS.getKey(alias, oldPassword);
                 KeyStore.Entry entry = null;
-                if (key instanceof SecretKey secretKey) entry = new KeyStore.SecretKeyEntry(secretKey);
+                if (key instanceof SecretKey secretKey) {
+                    // Normalize SecretKeys for BCFKS: non-FIPS algorithms are rejected
+                    if (BCFKS_KEYSTORE_TYPE.equals(targetType) && !isFipsApprovedAlgorithm(secretKey.getAlgorithm())) {
+                        secretKey = deriveAesKey(secretKey.getEncoded());
+                    }
+                    entry = new KeyStore.SecretKeyEntry(secretKey);
+                }
                 if (key instanceof PrivateKey privateKey)
                     entry = new KeyStore.PrivateKeyEntry(privateKey, oldKS.getCertificateChain(alias));
                 if (key instanceof PublicKey) entry = new KeyStore.TrustedCertificateEntry(oldKS.getCertificate(alias));

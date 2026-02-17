@@ -90,7 +90,7 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
         if (s != null) {
             return getEncrypterFromSession(s);
         } else {
-            LOGGER.warning("No session availabe to get url parameter encrypter");
+            LOGGER.warning("No session available to get url parameter encrypter");
             return NoCrypt;
         }
     }
