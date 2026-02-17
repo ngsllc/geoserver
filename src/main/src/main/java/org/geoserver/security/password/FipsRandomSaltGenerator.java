@@ -39,9 +39,7 @@ public class FipsRandomSaltGenerator implements SaltGenerator {
     @Override
     public byte[] generateSalt(final int lengthBytes) {
         final byte[] salt = new byte[lengthBytes];
-        synchronized (this.random) {
-            this.random.nextBytes(salt);
-        }
+        this.random.nextBytes(salt);
         return salt;
     }
 

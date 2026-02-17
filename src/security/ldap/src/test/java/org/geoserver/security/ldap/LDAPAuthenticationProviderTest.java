@@ -55,16 +55,20 @@ public class LDAPAuthenticationProviderTest extends LDAPBaseTest {
             assertEquals(3, result.getAuthorities().size());
         }
 
-        /** Test that without bindBeforeGroupSearch still works with UnboundID (which allows anonymous by default). */
+        /**
+         * Test that group search works without bindBeforeGroupSearch when anonymous access is
+         * allowed. UnboundID In-Memory LDAP server allows anonymous access by default, so this
+         * verifies the no-bind path succeeds.
+         */
         @Test
-        public void testBindBeforeGroupSearchRequiredIfAnonymousDisabled() throws Exception {
+        public void testGroupSearchWorksWithoutBindWhenAnonymousAllowed() throws Exception {
             // UnboundID In-Memory LDAP allows anonymous access by default
             ((LDAPSecurityServiceConfig) config).setUserDnPattern("uid={0},ou=People");
             // we don't bind
             config.setBindBeforeGroupSearch(false);
             createAuthenticationProvider();
 
-            // This should work with UnboundID
+            // This should work with UnboundID since anonymous is allowed
             Authentication result = authProvider.authenticate(authentication);
             assertNotNull(result);
             assertEquals(3, result.getAuthorities().size());

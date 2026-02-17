@@ -39,9 +39,7 @@ public class FipsRandomIvGenerator implements IvGenerator {
     @Override
     public byte[] generateIv(final int lengthBytes) {
         final byte[] iv = new byte[lengthBytes];
-        synchronized (this.random) {
-            this.random.nextBytes(iv);
-        }
+        this.random.nextBytes(iv);
         return iv;
     }
 
