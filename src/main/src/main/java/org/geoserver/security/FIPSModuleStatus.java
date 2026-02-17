@@ -60,7 +60,7 @@ public class FIPSModuleStatus implements ModuleStatus {
             msg.append("cryptographic operations using BCFKS keystore format.");
         } else {
             msg.append("Provider: Default (JCE)\n");
-            msg.append("\nNon-FIPS mode uses standard JCEKS keystore format with default Java providers.");
+            msg.append("\nNon-FIPS mode uses the ").append(keystoreType).append(" keystore format with default Java providers.");
         }
 
         return Optional.of(msg.toString());

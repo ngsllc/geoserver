@@ -18,9 +18,11 @@ import org.apache.wicket.core.random.ISecureRandomSupplier;
  */
 public class FipsSecureRandomSupplier implements ISecureRandomSupplier {
 
+    private static final SecureRandom INSTANCE = new SecureRandom();
+
     @Override
     public SecureRandom getRandom() {
         // Use the default SecureRandom, which in FIPS mode will use a FIPS-approved algorithm
-        return new SecureRandom();
+        return INSTANCE;
     }
 }
