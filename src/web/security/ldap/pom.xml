@@ -11,7 +11,7 @@
   <parent>
     <groupId>org.geoserver.web</groupId>
     <artifactId>gs-web-sec</artifactId>
-    <version>3.0-RC</version>
+    <version>2.28.2</version>
   </parent>
 
   <groupId>org.geoserver.web</groupId>
@@ -52,34 +52,19 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-jdbm-partition</artifactId>
+      <groupId>com.unboundid</groupId>
+      <artifactId>unboundid-ldapsdk</artifactId>
       <scope>test</scope>
     </dependency>
+    <!-- BouncyCastle FIPS providers needed for FIPS-mode testing with UnboundID LDAP server -->
     <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-core-integ</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-server-annotations</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-test-framework</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.wicket</groupId>
-      <artifactId>wicket-tester</artifactId>
-      <version>10.7.0</version>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bc-fips</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-lts8on</artifactId>
+      <artifactId>bcpkix-fips</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -102,20 +87,5 @@
       <artifactId>spring-security-ldap</artifactId>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <configuration>
-          <systemPropertyVariables>
-            <!-- Make ApacheDS work in the build directory, rather than using a fixed global position -->
-            <workingDirectory>${project.build.directory}/myDS</workingDirectory>
-          </systemPropertyVariables>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
 
 </project>

@@ -204,6 +204,16 @@ public class SecurityHomePageContentProvider implements GeoServerHomePageContent
                         .add(new AttributeAppender("class", new Model<>("warning-link"), " ")));
             }
 
+            // inform about FIPS mode
+            boolean fipsMode = org.geoserver.security.KeyStoreProviderImpl.isFipsMode();
+            if (fipsMode) {
+                add(new Label("fipsModeMsg", new StringResourceModel("fipsEnabled", new SecuritySettingsPage(), null))
+                        .add(new AttributeAppender("class", new Model<>("info-link"), " ")));
+            } else {
+                add(new Label("fipsModeMsg", new StringResourceModel("fipsDisabled", new SecuritySettingsPage(), null))
+                        .add(new AttributeAppender("class", new Model<>("info-link"), " ")));
+            }
+
             // check for password encoding in the default user group service
             visibility = false;
             if (passwordEncoderName != null) {

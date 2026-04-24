@@ -11,19 +11,53 @@ import org.apache.wicket.Component;
 import org.apache.wicket.markup.html.panel.FeedbackPanel;
 import org.apache.wicket.model.CompoundPropertyModel;
 import org.apache.wicket.model.Model;
+import org.geoserver.data.test.SystemTestData;
+import org.geoserver.security.config.SecurityManagerConfig;
 import org.geoserver.security.ldap.LDAPRoleServiceConfig;
+import org.geoserver.security.ldap.UnboundIDLDAPTestServer;
+import org.geoserver.security.web.AbstractSecurityWicketTestSupport;
 import org.geoserver.web.ComponentBuilder;
 import org.geoserver.web.FormTestPage;
+import org.junit.After;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 /** @author "Mauro Bartolomeoli - mauro.bartolomeoli@geo-solutions.it" */
-public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
+public class LDAPRoleServicePanelTest extends AbstractSecurityWicketTestSupport {
+
+    private static final String GROUPS_BASE = "ou=Groups";
+
+    private static final String GROUP_SEARCH_FILTER = "member=cn={0}";
+
+    private static final String AUTH_USER = "admin";
+
+    private static final String AUTH_PASSWORD = "secret";
 
     LDAPRoleServicePanel current;
+
+    String relBase = "panel:";
+    String base = "form:" + relBase;
 
     LDAPRoleServiceConfig config;
 
     FeedbackPanel feedbackPanel = null;
+
+    private static final String ldapServerUrl = UnboundIDLDAPTestServer.LDAP_SERVER_URL;
+    private static final String basePath = UnboundIDLDAPTestServer.LDAP_BASE_PATH;
+
+    @BeforeClass
+    public static void setUpLdapServer() throws Exception {
+        UnboundIDLDAPTestServer.startServer();
+    }
+
+    @AfterClass
+    public static void tearDownLdapServer() throws Exception {
+        UnboundIDLDAPTestServer.shutdownServer();
+    }
+
+    @After
+    public void tearDown() throws Exception {}
 
     protected void setupPanel(boolean needsAuthentication, boolean setRequiredFields) {
         config = new LDAPRoleServiceConfig();
@@ -37,6 +71,19 @@ public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
         config.setUser(AUTH_USER);
         config.setPassword(AUTH_PASSWORD);
         setupPanel(config);
+    }
+
+    private String getServerURL() {
+        return ldapServerUrl + "/" + basePath;
+    }
+
+    @Override
+    protected void onSetUp(SystemTestData testData) throws Exception {
+        super.onSetUp(testData);
+        // disable url parameter encoding for these tests
+        SecurityManagerConfig config = getSecurityManager().getSecurityConfig();
+        config.setEncryptingUrlParams(false);
+        getSecurityManager().saveSecurityConfig(config);
     }
 
     protected void setupPanel(LDAPRoleServiceConfig theConfig) {
@@ -68,7 +115,6 @@ public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testDataLoadedFromConfigurationWithoutAuthentication() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(false, true);
         checkBaseConfig();
 
@@ -80,7 +126,6 @@ public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testRequiredFields() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(false, false);
 
         tester.newFormTester("form").submit();
@@ -90,7 +135,6 @@ public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testDataLoadedFromConfigurationWithAuthentication() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(true, true);
         checkBaseConfig();
 
@@ -100,7 +144,6 @@ public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testAuthenticationDisabled() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(false, true);
         tester.assertInvisible("form:panel:authenticationPanelContainer:authenticationPanel");
         tester.newFormTester("form").setValue("panel:bindBeforeGroupSearch", "on");
@@ -110,7 +153,6 @@ public class LDAPRoleServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testAuthenticationEnabled() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(true, true);
         tester.assertVisible("form:panel:authenticationPanelContainer:authenticationPanel");
         tester.newFormTester("form").setValue("panel:bindBeforeGroupSearch", "");

@@ -7,7 +7,6 @@ package org.geoserver.security.password;
 import java.util.Objects;
 import org.jasypt.encryption.pbe.PBEStringEncryptor;
 import org.jasypt.exceptions.EncryptionInitializationException;
-import org.jasypt.util.text.BasicTextEncryptor;
 import org.jasypt.util.text.TextEncryptor;
 import org.springframework.dao.DataAccessException;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -96,8 +95,10 @@ public class JasyptPBEPasswordEncoderWrapper extends AbstractGeoserverPasswordEn
 
     private synchronized void checkInitialization() {
         if (this.useTextEncryptor == null) {
-            this.textEncryptor = new BasicTextEncryptor();
-            this.useTextEncryptor = Boolean.TRUE;
+            throw new EncryptionInitializationException(
+                    "PBE Password encoder not initialized: neither text encryptor "
+                            + "nor PBE string encryptor has been set. "
+                            + "Call setPbeStringEncryptor() or setTextEncryptor() before use.");
         } else if (this.useTextEncryptor) {
             if (this.textEncryptor == null) {
                 throw new EncryptionInitializationException(

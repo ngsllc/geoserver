@@ -52,6 +52,12 @@
       <artifactId>gt-jdbc-postgis</artifactId>
       <scope>test</scope>
     </dependency>
+    <dependency>
+      <!-- BouncyCastle FIPS provider for BCFKS keystore support in FIPS migration tests -->
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bc-fips</artifactId>
+      <scope>test</scope>
+    </dependency>
 
   </dependencies>
 

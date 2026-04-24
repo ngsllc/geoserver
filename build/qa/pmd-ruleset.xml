@@ -129,5 +129,24 @@ GeoTools ruleset. See https://pmd.github.io/latest/pmd_userdocs_understanding_ru
     </properties>
   </rule>
   
+  <!-- FIPS Compliance: Weak crypto exclusions for legacy data migration.
+       URLMasterPasswordProvider uses MD5/DES only to decrypt master passwords that were
+       encrypted before FIPS support. This happens only in non-FIPS mode, and passwords
+       are immediately migrated to FIPS-approved algorithms. In FIPS mode, MD5/DES usage
+       is blocked with a clear error. See URLMasterPasswordProvider.decode() for details. -->
+  <rule ref="category/java/security.xml">
+    <exclude name="WeakCryptography"/>
+  </rule>
+  <rule ref="category/java/security.xml/WeakCryptography">
+    <properties>
+      <property name="violationSuppressXPath">
+        <value>
+          <![CDATA[
+            //ClassOrInterfaceDeclaration[@SimpleName='URLMasterPasswordProvider']
+          ]]>
+        </value>
+      </property>
+    </properties>
+  </rule>
 
 </ruleset>

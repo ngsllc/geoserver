@@ -11,7 +11,7 @@
   <parent>
     <groupId>org.geoserver</groupId>
     <artifactId>gs-security</artifactId>
-    <version>3.0-RC</version>
+    <version>2.28.2</version>
   </parent>
 
   <groupId>org.geoserver.security</groupId>
@@ -20,10 +20,6 @@
   <name>GeoServer LDAP Security Module</name>
 
   <dependencies>
-    <dependency>
-      <groupId>jakarta.servlet</groupId>
-      <artifactId>jakarta.servlet-api</artifactId>
-    </dependency>
     <dependency>
       <groupId>org.geoserver</groupId>
       <artifactId>gs-main</artifactId>
@@ -52,49 +48,12 @@
         </exclusion>
       </exclusions>
     </dependency>
+    <!-- UnboundID In-Memory LDAP Server - no BouncyCastle dependency, works with bc-fips -->
     <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-core</artifactId>
-      <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <artifactId>bcprov-jdk15on</artifactId>
-          <groupId>org.bouncycastle</groupId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-protocol-ldap</artifactId>
-      <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <artifactId>bcprov-jdk15on</artifactId>
-          <groupId>org.bouncycastle</groupId>
-        </exclusion>
-      </exclusions>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-jdbm-partition</artifactId>
+      <groupId>com.unboundid</groupId>
+      <artifactId>unboundid-ldapsdk</artifactId>
       <scope>test</scope>
     </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-core-integ</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-server-annotations</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-test-framework</artifactId>
-      <scope>test</scope>
-    </dependency>
-
     <dependency>
       <groupId>org.geoserver</groupId>
       <artifactId>gs-main</artifactId>
@@ -117,16 +76,7 @@
           </execution>
         </executions>
       </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <configuration>
-          <systemPropertyVariables>
-            <!-- Make ApacheDS work in the build directory, rather than using a fixed global position -->
-            <workingDirectory>${project.build.directory}/myDS</workingDirectory>
-          </systemPropertyVariables>
-        </configuration>
-      </plugin>
+
     </plugins>
   </build>
 </project>

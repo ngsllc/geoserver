@@ -2039,9 +2039,11 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             ugConfig.setCheckInterval(checkInterval);
             ugConfig.setFileName(XMLConstants.FILE_UR);
             ugConfig.setValidating(true);
-            // start with weak encryption, plain passwords can be restored
-            ugConfig.setPasswordEncoderName(loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, false)
-                    .getName());
+            // In FIPS mode, we need to use strong encryption since weak algorithms are not available
+            // In non-FIPS mode, start with weak encryption so plain passwords can be restored
+            boolean strong = KeyStoreProviderImpl.isFipsMode();
+            GeoServerPBEPasswordEncoder encoder = loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, strong);
+            ugConfig.setPasswordEncoderName(encoder.getName());
             ugConfig.setPasswordPolicyName(PasswordValidator.DEFAULT_NAME);
             saveUserGroupService(ugConfig);
             userGroupService = loadUserGroupService(XMLUserGroupService.DEFAULT_NAME);
@@ -2194,9 +2196,11 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         config.getAuthProviderNames().add(authProvider.getName());
         config.setEncryptingUrlParams(false);
 
-        // start with weak encryption
-        config.setConfigPasswordEncrypterName(loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, false)
-                .getName());
+        // In FIPS mode, use strong encryption; otherwise start with weak encryption for compatibility
+        boolean useStrongEncryption = KeyStoreProviderImpl.isFipsMode();
+        config.setConfigPasswordEncrypterName(
+                loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, useStrongEncryption)
+                        .getName());
 
         // setup the default remember me service
         RememberMeServicesConfig rememberMeConfig = new RememberMeServicesConfig();
