@@ -56,4 +56,20 @@
     <Match>
       <Bug pattern="RCN_REDUNDANT_NULLCHECK_WOULD_HAVE_BEEN_A_NPE"/>
     </Match>
+    
+    <!-- FIPS Compliance: Legacy weak crypto algorithm used only for migration from legacy data.
+         MD5/DES (PBEWithMD5AndDES) is only used to decrypt existing master passwords that were
+         encrypted before FIPS support was added. This only happens in non-FIPS mode, and the
+         password is immediately re-encrypted with FIPS-approved algorithm (PBEWithHmacSHA256AndAES_128).
+         In FIPS mode, any attempt to use MD5/DES is explicitly rejected with a clear error message.
+         See URLMasterPasswordProvider.decode() for the migration logic. -->
+    <Match>
+      <Class name="org.geoserver.security.password.URLMasterPasswordProvider"/>
+      <Or>
+        <Bug pattern="WEAK_MESSAGE_DIGEST_MD5"/>
+        <Bug pattern="DES_USAGE"/>
+        <Bug pattern="STATIC_IV"/>
+        <Bug pattern="WEAK_CIPHER"/>
+      </Or>
+    </Match>
 </FindBugsFilter>

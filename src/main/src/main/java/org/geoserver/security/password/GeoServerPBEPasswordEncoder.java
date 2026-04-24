@@ -10,8 +10,13 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 import static org.geoserver.security.SecurityUtils.toChars;
 
 import java.io.IOException;
+import java.security.Provider;
+import java.security.Security;
 import java.util.Arrays;
 import java.util.Base64;
+import java.util.Set;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geoserver.security.KeyStoreProvider;
@@ -31,6 +36,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  */
 public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncoder {
 
+    private static final Logger LOGGER = Logger.getLogger(GeoServerPBEPasswordEncoder.class.getName());
+
+    /** Algorithms that are NOT FIPS-compliant and cannot be used when FIPS mode is enabled */
+    private static final Set<String> NON_FIPS_ALGORITHMS =
+            Set.of("PBEWITHMD5ANDDES", "PBEWITHMD5ANDTRIPLEDES", "PBEWITHSHA1ANDDES", "PBEWITHSHA1ANDDESEDE");
+
     StandardPBEStringEncryptor stringEncrypter;
     StandardPBEByteEncryptor byteEncrypter;
 
@@ -42,6 +53,11 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     @Override
     public void initialize(GeoServerSecurityManager securityManager) throws IOException {
         this.keystoreProvider = securityManager.getKeyStoreProvider();
+        if (KeyStoreProviderImpl.isFipsMode()
+                && algorithm != null
+                && NON_FIPS_ALGORITHMS.contains(algorithm.toUpperCase())) {
+            throw new IOException("Algorithm '" + algorithm + "' not available in FIPS mode");
+        }
     }
 
     @Override
@@ -80,14 +96,18 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     protected PasswordEncoder createStringEncoder() {
         byte[] password = lookupPasswordFromKeyStore();
 
-        char[] chars = toChars(password);
+        String passwordString = Base64.getEncoder().encodeToString(password);
+        char[] chars = passwordString.toCharArray();
         try {
             stringEncrypter = new StandardPBEStringEncryptor();
             stringEncrypter.setPasswordCharArray(chars);
+            // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+            stringEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+            stringEncrypter.setIvGenerator(new FipsRandomIvGenerator());
 
-            if (getProviderName() != null && !getProviderName().isEmpty()) {
+            ensureProviderAvailableIfRequested();
+            if (getProviderName() != null && !getProviderName().isEmpty())
                 stringEncrypter.setProviderName(getProviderName());
-            }
             stringEncrypter.setAlgorithm(getAlgorithm());
 
             JasyptPBEPasswordEncoderWrapper encoder = new JasyptPBEPasswordEncoderWrapper();
@@ -103,41 +123,83 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     @Override
     protected CharArrayPasswordEncoder createCharEncoder() {
         byte[] password = lookupPasswordFromKeyStore();
-        char[] chars = toChars(password);
+        String passwordString = Base64.getEncoder().encodeToString(password);
+        char[] chars = passwordString.toCharArray();
 
-        byteEncrypter = new StandardPBEByteEncryptor();
-        byteEncrypter.setPasswordCharArray(chars);
+        try {
+            byteEncrypter = new StandardPBEByteEncryptor();
+            byteEncrypter.setPasswordCharArray(chars);
+            // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+            byteEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+            byteEncrypter.setIvGenerator(new FipsRandomIvGenerator());
+            ensureProviderAvailableIfRequested();
+            if (getProviderName() != null && !getProviderName().isEmpty())
+                byteEncrypter.setProviderName(getProviderName());
+            byteEncrypter.setAlgorithm(getAlgorithm());
 
-        if (getProviderName() != null && !getProviderName().isEmpty()) {
-            byteEncrypter.setProviderName(getProviderName());
+            // Return the encoder; the finally block below scrambles password/chars.
+            // This is safe because Jasypt's setPasswordCharArray() copies the array internally.
+            return new CharArrayPasswordEncoder() {
+                @Override
+                public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
+                    byte[] decoded = Base64.getDecoder().decode(encPass.getBytes());
+                    byte[] decrypted = byteEncrypter.decrypt(decoded);
+
+                    char[] chars = toChars(decrypted);
+                    try {
+                        return Arrays.equals(chars, rawPass);
+                    } finally {
+                        scramble(decrypted);
+                        scramble(chars);
+                    }
+                }
+
+                @Override
+                public String encodePassword(char[] rawPass, Object salt) {
+                    byte[] bytes = toBytes(rawPass);
+                    try {
+                        return new String(Base64.getEncoder().encode(byteEncrypter.encrypt(bytes)));
+                    } finally {
+                        scramble(bytes);
+                    }
+                }
+            };
+        } finally {
+            scramble(password);
+            scramble(chars);
         }
-        byteEncrypter.setAlgorithm(getAlgorithm());
+    }
 
-        return new CharArrayPasswordEncoder() {
-            @Override
-            public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
-                byte[] decoded = Base64.getDecoder().decode(encPass.getBytes());
-                byte[] decrypted = byteEncrypter.decrypt(decoded);
-
-                char[] chars = toChars(decrypted);
-                try {
-                    return Arrays.equals(chars, rawPass);
-                } finally {
-                    scramble(decrypted);
-                    scramble(chars);
-                }
+    /**
+     * Ensures the requested JCE provider (e.g., "BCFIPS") is available; attempts lazy registration to preserve backward
+     * compatibility with configurations that specify a provider.
+     */
+    private void ensureProviderAvailableIfRequested() {
+        String requested = getProviderName();
+        if (requested == null || requested.isEmpty()) return;
+        Provider existing = Security.getProvider(requested);
+        if (existing != null) return;
+        try {
+            if ("BCFIPS".equals(requested)) {
+                Class<?> providerClass = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
+                Security.addProvider(
+                        (Provider) providerClass.getDeclaredConstructor().newInstance());
             }
-
-            @Override
-            public String encodePassword(char[] rawPass, Object salt) {
-                byte[] bytes = toBytes(rawPass);
-                try {
-                    return new String(Base64.getEncoder().encode(byteEncrypter.encrypt(bytes)));
-                } finally {
-                    scramble(bytes);
-                }
+            // Note: Regular BC provider is not shipped with GeoServer; only BC-FIPS is available
+        } catch (ReflectiveOperationException | SecurityException e) {
+            // In FIPS mode this is a real problem — the algorithm will likely fail downstream.
+            // In non-FIPS mode it's acceptable to fall back to default providers.
+            if (KeyStoreProviderImpl.isFipsMode()) {
+                LOGGER.log(
+                        Level.WARNING,
+                        "Failed to register requested security provider '" + requested
+                                + "' in FIPS mode. Encryption operations may fail: " + e.getMessage());
+            } else {
+                LOGGER.log(
+                        Level.FINE,
+                        "Provider '" + requested + "' not available, falling back to default JCA providers");
             }
-        };
+        }
     }
 
     byte[] lookupPasswordFromKeyStore() {

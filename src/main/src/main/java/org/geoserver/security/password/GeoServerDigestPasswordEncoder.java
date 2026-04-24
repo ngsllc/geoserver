@@ -9,7 +9,7 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 
 import org.apache.commons.codec.binary.Base64;
 import org.jasypt.digest.StandardByteDigester;
-import org.jasypt.util.password.StrongPasswordEncryptor;
+import org.jasypt.digest.StandardStringDigester;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
@@ -30,9 +30,16 @@ public class GeoServerDigestPasswordEncoder extends AbstractGeoserverPasswordEnc
 
     @Override
     protected PasswordEncoder createStringEncoder() {
-        PasswordEncoder encoder = new JasyptPasswordEncoderWrapper();
-        ((JasyptPasswordEncoderWrapper) encoder).setPasswordEncryptor(new StrongPasswordEncryptor());
-        ((JasyptPasswordEncoderWrapper) encoder).setPrefix(getPrefix());
+        // Configure digester directly with FIPS-compatible salt generator
+        StandardStringDigester digester = new StandardStringDigester();
+        digester.setAlgorithm("SHA-256");
+        digester.setIterations(100000);
+        digester.setSaltSizeBytes(16);
+        digester.setSaltGenerator(new FipsRandomSaltGenerator());
+
+        JasyptPasswordEncoderWrapper encoder = new JasyptPasswordEncoderWrapper();
+        encoder.setStringDigester(digester);
+        encoder.setPrefix(getPrefix());
         return encoder;
     }
 
@@ -45,6 +52,8 @@ public class GeoServerDigestPasswordEncoder extends AbstractGeoserverPasswordEnc
                 digester.setAlgorithm("SHA-256");
                 digester.setIterations(100000);
                 digester.setSaltSizeBytes(16);
+                // Use FIPS-compatible salt generator instead of Jasypt's default which uses SHA1PRNG
+                digester.setSaltGenerator(new FipsRandomSaltGenerator());
                 digester.initialize();
             }
 
@@ -67,6 +76,6 @@ public class GeoServerDigestPasswordEncoder extends AbstractGeoserverPasswordEnc
 
     @Override
     public String encode(CharSequence rawPassword) {
-        return createCharEncoder().encodePassword(decodeToCharArray(rawPassword.toString()), null);
+        return getCharEncoder().encodePassword(decodeToCharArray(rawPassword.toString()), null);
     }
 }

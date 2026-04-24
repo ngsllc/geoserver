@@ -22,6 +22,7 @@ import java.util.logging.Logger;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geoserver.security.KeyStoreProvider;
+import org.geoserver.security.KeyStoreProviderImpl;
 import org.geoserver.security.xml.XMLUserGroupService;
 import org.geoserver.test.GeoServerMockTestSupport;
 import org.geotools.util.logging.Logging;
@@ -237,7 +238,12 @@ public class GeoserverPasswordEncoderTest extends GeoServerMockTestSupport {
 
     protected List<GeoServerPasswordEncoder> getConfigPBEEncoders() {
         List<GeoServerPasswordEncoder> result = new ArrayList<>();
-        result.add(getPBEPasswordEncoder());
+        // Skip weak PBE encoder in FIPS mode - PBEWITHMD5ANDDES is not available
+        if (!KeyStoreProviderImpl.isFipsMode()) {
+            result.add(getPBEPasswordEncoder());
+        } else {
+            LOGGER.warning("Skipping weak PBE encoder tests in FIPS mode");
+        }
         if (getSecurityManager().isStrongEncryptionAvailable()) {
             result.add(getStrongPBEPasswordEncoder());
         } else {
@@ -304,7 +310,12 @@ public class GeoserverPasswordEncoderTest extends GeoServerMockTestSupport {
 
     protected List<GeoServerPBEPasswordEncoder> getPBEEncoders() {
         List<GeoServerPBEPasswordEncoder> result = new ArrayList<>();
-        result.add(getPBEPasswordEncoder());
+        // Skip weak PBE encoder in FIPS mode - PBEWITHMD5ANDDES is not available
+        if (!KeyStoreProviderImpl.isFipsMode()) {
+            result.add(getPBEPasswordEncoder());
+        } else {
+            LOGGER.warning("Skipping weak PBE encoder tests in FIPS mode");
+        }
         if (getSecurityManager().isStrongEncryptionAvailable()) {
             result.add(getStrongPBEPasswordEncoder());
         } else {

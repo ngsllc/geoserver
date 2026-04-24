@@ -9,6 +9,7 @@ import static org.geoserver.web.util.WebUtils.IsWicketCssFileEmpty;
 
 import org.apache.wicket.ajax.AjaxRequestTarget;
 import org.apache.wicket.ajax.markup.html.AjaxLink;
+import org.apache.wicket.behavior.AttributeAppender;
 import org.apache.wicket.markup.html.basic.Label;
 import org.apache.wicket.markup.html.form.CheckBox;
 import org.apache.wicket.markup.html.form.Form;
@@ -88,6 +89,16 @@ public class SecuritySettingsPage extends AbstractSecurityPage {
                 add(l);
             } else {
                 add(new Label("strongEncryptionMsg", new StringResourceModel("noStrongEncryption", this, null)));
+            }
+
+            // Add FIPS mode indicator
+            boolean fipsMode = org.geoserver.security.KeyStoreProviderImpl.isFipsMode();
+            if (fipsMode) {
+                add(new Label("fipsModeMsg", new StringResourceModel("fipsEnabled", this, null))
+                        .add(new AttributeAppender("class", new Model<>("info-link"), " ")));
+            } else {
+                add(new Label("fipsModeMsg", new StringResourceModel("fipsDisabled", this, null))
+                        .add(new AttributeAppender("class", new Model<>("info-link"), " ")));
             }
 
             add(new CheckBox("encryptingUrlParams"));

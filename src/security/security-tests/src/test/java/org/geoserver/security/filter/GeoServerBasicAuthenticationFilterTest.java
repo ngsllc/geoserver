@@ -36,7 +36,7 @@ public class GeoServerBasicAuthenticationFilterTest {
     public void setUp() throws Exception {
         authenticationFilter = createAuthenticationFilter();
         String buff = PASSWORD + ":" + authenticationFilter.getName();
-        MessageDigest digest = MessageDigest.getInstance("MD5");
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
         String digestString = String.valueOf(Hex.encode(digest.digest(buff.getBytes(UTF_8))));
         expected = USERNAME + digestString;
     }

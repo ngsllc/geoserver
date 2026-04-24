@@ -70,9 +70,10 @@ public class GeoServerCredentialsFromRequestHeaderFilter extends GeoServerSecuri
 
         // digest used to create a cacheKey containing the user password
         try {
-            digest = MessageDigest.getInstance("MD5");
+            // Use SHA-256 for cache key hashing (non-cryptographic boundary, FIPS-friendly)
+            digest = MessageDigest.getInstance("SHA-256");
         } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("No MD5 algorithm available!");
+            throw new IllegalStateException("No SHA-256 algorithm available!");
         }
     }
 

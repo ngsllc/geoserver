@@ -4,35 +4,34 @@
  */
 package org.geoserver.security.ldap;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
+import static org.junit.Assert.assertTrue;
 
 import java.util.SortedSet;
-import org.apache.directory.server.annotations.CreateLdapServer;
-import org.apache.directory.server.annotations.CreateTransport;
-import org.apache.directory.server.core.annotations.ApplyLdifFiles;
-import org.apache.directory.server.core.annotations.CreateDS;
-import org.apache.directory.server.core.annotations.CreatePartition;
-import org.apache.directory.server.core.integ.ApacheDSTestExtension;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geoserver.security.impl.GeoServerUser;
 import org.geoserver.security.impl.GeoServerUserGroup;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.AfterClass;
+import org.junit.Before;
+import org.junit.BeforeClass;
+import org.junit.Test;
+import org.springframework.core.io.ClassPathResource;
 
 /** @author Niels Charlier */
-@ExtendWith(ApacheDSTestExtension.class)
-@CreateLdapServer(
-        transports = {@CreateTransport(protocol = "LDAP", address = "localhost")},
-        allowAnonymousAccess = true)
-@CreateDS(
-        name = "myDS",
-        partitions = {@CreatePartition(name = "test", suffix = LDAPTestUtils.LDAP_BASE_PATH)})
-@ApplyLdifFiles({"data4.ldif"})
 public class LDAPUserGroupServiceTest extends LDAPBaseTest {
+
+    @BeforeClass
+    public static void setUpLdapServerData4() throws Exception {
+        UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data4.ldif"));
+    }
+
+    @AfterClass
+    public static void tearDownLdapServerData4() throws Exception {
+        UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data.ldif"));
+    }
+
     GeoServerUserGroupService service;
 
     @Override
@@ -40,7 +39,7 @@ public class LDAPUserGroupServiceTest extends LDAPBaseTest {
         config = new LDAPUserGroupServiceConfig();
     }
 
-    @BeforeEach
+    @Before
     public void createUserGroupService() throws Exception {
         config.setGroupNameAttribute("cn");
         config.setUserSearchBase("ou=People");
