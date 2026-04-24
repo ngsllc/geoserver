@@ -14,17 +14,13 @@ import static org.junit.Assert.assertTrue;
 
 import java.io.IOException;
 import java.util.SortedSet;
-import org.apache.directory.server.annotations.CreateLdapServer;
-import org.apache.directory.server.annotations.CreateTransport;
-import org.apache.directory.server.core.annotations.ApplyLdifFiles;
-import org.apache.directory.server.core.annotations.CreateDS;
-import org.apache.directory.server.core.annotations.CreatePartition;
-import org.apache.directory.server.core.integ.FrameworkRunner;
 import org.geoserver.security.GeoServerRoleService;
 import org.geoserver.security.impl.GeoServerRole;
+import org.junit.AfterClass;
 import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
-import org.junit.runner.RunWith;
+import org.springframework.core.io.ClassPathResource;
 
 public class LDAPRoleServiceTest extends LDAPBaseTest {
 
@@ -164,91 +160,75 @@ public class LDAPRoleServiceTest extends LDAPBaseTest {
         config = new LDAPRoleServiceConfig();
     }
 
-    @RunWith(FrameworkRunner.class)
-    @CreateLdapServer(
-            transports = {@CreateTransport(protocol = "LDAP", address = "localhost")},
-            allowAnonymousAccess = true)
-    @CreateDS(
-            name = "myDS",
-            partitions = {@CreatePartition(name = "test", suffix = LDAPTestUtils.LDAP_BASE_PATH)})
-    @ApplyLdifFiles({"data.ldif"})
     public static class LDAPRoleServiceLdiffTest extends LDAPRoleServiceTest {
+
+        @BeforeClass
+        public static void setUpLdapServerLdiff() throws Exception {
+            UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data.ldif"));
+        }
+
+        @AfterClass
+        public static void tearDownLdapServerLdiff() throws Exception {
+            UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data.ldif"));
+        }
 
         @Test
         public void testGetRoles() throws Exception {
-            getService().setAllowAnonymousAccess(true);
-
             checkAllRoles();
         }
 
         @Test
         public void testGetRolesAuthenticated() throws Exception {
-            getService().setAllowAnonymousAccess(false);
             configureAuthentication();
             checkAllRoles();
         }
 
         @Test
         public void testGetRolesCount() throws Exception {
-            getService().setAllowAnonymousAccess(true);
-
             checkRoleCount();
         }
 
         @Test
         public void testGetRolesCountAuthenticated() throws Exception {
-            getService().setAllowAnonymousAccess(true);
             configureAuthentication();
             checkRoleCount();
         }
 
         @Test
         public void testGetRoleByName() throws Exception {
-            getService().setAllowAnonymousAccess(true);
-
             checkRoleByName();
         }
 
         @Test
         public void testGetRoleByNameAuthenticated() throws Exception {
-            getService().setAllowAnonymousAccess(false);
             configureAuthentication();
             checkRoleByName();
         }
 
         @Test
         public void testGetAdminRoles() throws Exception {
-            getService().setAllowAnonymousAccess(true);
-
             checkAdminRoles();
         }
 
         @Test
         public void testGetAdminRolesAuthenticated() throws Exception {
-            getService().setAllowAnonymousAccess(false);
             configureAuthentication();
             checkAdminRoles();
         }
 
         @Test
         public void testGetRolesForUser() throws Exception {
-            getService().setAllowAnonymousAccess(true);
-
             checkUserRoles("admin", false);
         }
 
         @Test
         public void testGetRolesForUserAuthenticated() throws Exception {
-            getService().setAllowAnonymousAccess(false);
-
             configureAuthentication();
             checkUserRoles("admin", false);
         }
 
         @Test
         public void testGetUserNamesForRole() throws Exception {
-            getService().setAllowAnonymousAccess(true);
-
             checkUserNamesForRole("admin", 1, false);
             checkUserNamesForRole("other", 2, false);
         }
@@ -270,47 +250,47 @@ public class LDAPRoleServiceTest extends LDAPBaseTest {
         }
     }
 
-    @RunWith(FrameworkRunner.class)
-    @CreateLdapServer(
-            transports = {@CreateTransport(protocol = "LDAP", address = "localhost")},
-            allowAnonymousAccess = true)
-    @CreateDS(
-            name = "myDS",
-            partitions = {@CreatePartition(name = "test", suffix = LDAPTestUtils.LDAP_BASE_PATH)})
-    @ApplyLdifFiles({"data2.ldif"})
     public static class LDAPRoleServiceLdiff2Test extends LDAPRoleServiceTest {
+
+        @BeforeClass
+        public static void setUpLdapServerLdiff2() throws Exception {
+            UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data2.ldif"));
+        }
+
+        @AfterClass
+        public static void tearDownLdapServerLdiff2() throws Exception {
+            UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data.ldif"));
+        }
 
         @Test
         public void testGetRolesForUserUsingUserFilter() throws Exception {
-
             checkUserRoles("admin", true);
         }
 
         @Test
         public void testGetRolesForUserAuthenticatedUsingUserFilter() throws Exception {
-            getService().setAllowAnonymousAccess(false);
-
             configureAuthentication();
             checkUserRoles("admin", true);
         }
 
         @Test
         public void testGetUserNamesForRoleUsingUserFilter() throws Exception {
-            getService().setAllowAnonymousAccess(true);
             checkUserNamesForRole("admin", 1, true);
             checkUserNamesForRole("other", 2, true);
         }
     }
 
-    @RunWith(FrameworkRunner.class)
-    @CreateLdapServer(
-            transports = {@CreateTransport(protocol = "LDAP", address = "localhost")},
-            allowAnonymousAccess = true)
-    @CreateDS(
-            name = "myDS",
-            partitions = {@CreatePartition(name = "test", suffix = LDAPTestUtils.LDAP_BASE_PATH)})
-    @ApplyLdifFiles({"data4.ldif"})
     public static class LDAPRoleServiceLdiff4Test extends LDAPRoleServiceTest {
+
+        @BeforeClass
+        public static void setUpLdapServerLdiff4() throws Exception {
+            UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data4.ldif"));
+        }
+
+        @AfterClass
+        public static void tearDownLdapServerLdiff4() throws Exception {
+            UnboundIDLDAPTestServer.reloadData(new ClassPathResource("data.ldif"));
+        }
 
         @Test
         public void checkHierarchicalRolesUsers() throws IOException {

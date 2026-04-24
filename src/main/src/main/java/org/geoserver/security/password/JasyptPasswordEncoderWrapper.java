@@ -4,9 +4,9 @@
  */
 package org.geoserver.security.password;
 
+import org.jasypt.digest.StandardStringDigester;
 import org.jasypt.digest.StringDigester;
 import org.jasypt.exceptions.EncryptionInitializationException;
-import org.jasypt.util.password.BasicPasswordEncryptor;
 import org.jasypt.util.password.PasswordEncryptor;
 import org.springframework.security.crypto.factory.PasswordEncoderFactories;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -91,8 +91,14 @@ public class JasyptPasswordEncoderWrapper extends AbstractGeoserverPasswordEncod
      */
     private synchronized void checkInitialization() {
         if (this.useEncryptor == null) {
-            this.passwordEncryptor = new BasicPasswordEncryptor();
-            this.useEncryptor = Boolean.TRUE;
+            // Use FIPS-compatible digester instead of BasicPasswordEncryptor which uses SHA1PRNG
+            StandardStringDigester digester = new StandardStringDigester();
+            digester.setAlgorithm("SHA-256");
+            digester.setIterations(100000);
+            digester.setSaltSizeBytes(16);
+            digester.setSaltGenerator(new FipsRandomSaltGenerator());
+            this.stringDigester = digester;
+            this.useEncryptor = Boolean.FALSE;
         } else {
             if (this.useEncryptor.booleanValue()) {
                 if (this.passwordEncryptor == null) {

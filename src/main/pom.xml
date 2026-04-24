@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- 
+<!--
  Copyright (C) 2014 - Open Source Geospatial Foundation. All rights reserved.
  This code is licensed under the GPL 2.0 license, available at the root
  application directory.
@@ -220,28 +220,32 @@
       <groupId>org.jasypt</groupId>
       <artifactId>jasypt-springsecurity3</artifactId>
     </dependency>
+    <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-jdk18on</artifactId>
+      <artifactId>bc-fips</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-fips</artifactId>
     </dependency>
 
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-collections4</artifactId>
     </dependency>
+
+    <!-- JSON processing -->
     <dependency>
-      <groupId>org.apache.commons</groupId>
-      <artifactId>commons-text</artifactId>
+      <groupId>org.codehaus.jettison</groupId>
+      <artifactId>jettison</artifactId>
     </dependency>
 
+    <!-- Test dependencies -->
     <dependency>
       <groupId>org.geotools.jdbc</groupId>
       <artifactId>gt-jdbc-h2</artifactId>
       <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.codehaus.jettison</groupId>
-      <artifactId>jettison</artifactId>
     </dependency>
     <dependency>
       <groupId>org.geotools</groupId>
@@ -293,4 +297,5 @@
       </plugin>
     </plugins>
   </build>
+
 </project>

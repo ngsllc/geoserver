@@ -61,8 +61,8 @@
   <bean id="strongPbePasswordEncoder"    
     class="org.geoserver.security.password.GeoServerPBEPasswordEncoder" scope="prototype">
     <property name="prefix" value="crypt2" />
-    <property name="providerName" value="BC" />
-    <property name="algorithm" value="PBEWITHSHA256AND256BITAES-CBC-BC" />
+    <property name="providerName" value="#{ systemProperties['geoserver.encryption.provider'] ?: 'BCFIPS' }" />
+    <property name="algorithm" value="#{ systemProperties['geoserver.encryption.algorithm'] ?: 'PBEWITHSHA256AND256BITAES-CBC-BC' }" />
     <property name="availableWithoutStrongCryptogaphy" value="false" />
   </bean>  
   <bean id="digestPasswordEncoder"    

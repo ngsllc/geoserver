@@ -12,6 +12,7 @@ GeoServer is geared towards many different uses, from a simple test server to th
    container
    config
    data
+   fips
    linuxscript
    misc
    troubleshooting

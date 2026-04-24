@@ -2594,7 +2594,7 @@ public class GWC implements DisposableBean, InitializingBean, ApplicationContext
 
     /** Computes and returns the etag of a tile given its byte contents */
     public static String getETag(byte[] tileBytes) throws NoSuchAlgorithmException {
-        final byte[] hash = MessageDigest.getInstance("MD5").digest(tileBytes);
+        final byte[] hash = MessageDigest.getInstance("SHA-256").digest(tileBytes);
         final String etag = toHexString(hash);
         return etag;
     }

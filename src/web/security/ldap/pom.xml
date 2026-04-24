@@ -52,20 +52,19 @@
       <scope>test</scope>
     </dependency>
     <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-all</artifactId>
+      <groupId>com.unboundid</groupId>
+      <artifactId>unboundid-ldapsdk</artifactId>
       <scope>test</scope>
     </dependency>
-    <!--
-      bcprov-jdk15 must be before spring-ldap-test because the latter depends
-      on apacheds-all, which repackages an unsigned bcprov-jdk5 security
-      provider, which Oracle JDK 7 and 8 refuse to load, breaking the build on
-      those platforms. Placing the bcprov-jdk18 signed security provider here
-      places it earlier on the classpath than the unsigned provider.
-    -->
+    <!-- BouncyCastle FIPS providers needed for FIPS-mode testing with UnboundID LDAP server -->
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-jdk18on</artifactId>
+      <artifactId>bc-fips</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-fips</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
@@ -88,20 +87,5 @@
       <artifactId>spring-security-ldap</artifactId>
     </dependency>
   </dependencies>
-
-  <build>
-    <plugins>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-surefire-plugin</artifactId>
-        <configuration>
-          <systemPropertyVariables>
-            <!-- Make ApacheDS work in the build directory, rather than using a fixed global position -->
-            <workingDirectory>${project.build.directory}/myDS</workingDirectory>
-          </systemPropertyVariables>
-        </configuration>
-      </plugin>
-    </plugins>
-  </build>
 
 </project>

@@ -615,10 +615,17 @@
         <artifactId>jasypt-springsecurity3</artifactId>
         <version>${jasypt.version}</version>
       </dependency>
+      <!-- BouncyCastle FIPS dependencies for FIPS 140-2 compliance -->
+      <!-- Note: bc-fips 2.1.2 is compatible with bcpkix-fips 2.1.x versions -->
       <dependency>
         <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-jdk18on</artifactId>
-        <version>1.79</version>
+        <artifactId>bc-fips</artifactId>
+        <version>2.1.2</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-fips</artifactId>
+        <version>2.1.10</version>
       </dependency>
 
       <!-- wicket framework -->
@@ -855,8 +862,8 @@
             <groupId>commons-logging</groupId>
           </exclusion>
         </exclusions>
-        <!-- Needed to solve NamespaceHandler class org.apache.xbean.spring.context.v2.XBeanNamespaceHandler 
-             for namespace [http://activemq.apache.org/schema/core] not found ClassNotFoundException: 
+        <!-- Needed to solve NamespaceHandler class org.apache.xbean.spring.context.v2.XBeanNamespaceHandler
+             for namespace [http://activemq.apache.org/schema/core] not found ClassNotFoundException:
              org.apache.xbean.spring.context.v2.XBeanNamespaceHandler
         -->
       </dependency>
@@ -963,6 +970,12 @@
         <groupId>org.testng</groupId>
         <artifactId>testng</artifactId>
         <version>7.11.0</version>
+        <scope>test</scope>
+      </dependency>
+      <dependency>
+        <groupId>com.unboundid</groupId>
+        <artifactId>unboundid-ldapsdk</artifactId>
+        <version>6.0.11</version>
         <scope>test</scope>
       </dependency>
     </dependencies>
@@ -1266,6 +1279,27 @@
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>4.7.3.4</version>
         </plugin>
+        <!-- Copy BC-FIPS libs to fips-libs directory for packaging.
+             Declared in pluginManagement so it only runs in modules that
+             explicitly activate it (e.g., web/app WAR module). -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <executions>
+            <execution>
+              <id>copy-fips-libs</id>
+              <phase>prepare-package</phase>
+              <goals>
+                <goal>copy-dependencies</goal>
+              </goals>
+              <configuration>
+                <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
+                <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
+                <stripVersion>true</stripVersion>
+              </configuration>
+            </execution>
+          </executions>
+        </plugin>
       </plugins>
     </pluginManagement>
 
@@ -1314,7 +1348,7 @@
           <!-- Adding opens for build to work.
                Needed for mock frameworks: java.base/java.lang
                Additional needs for XStream:  java.base/java.util, java.base/java.lang.reflect, java.base/java.text, java.desktop/java.awt.font
-               Additional needs for JAI: java.desktop/sun.awt.image 
+               Additional needs for JAI: java.desktop/sun.awt.image
                Additional needs for LDAP tests:  java.naming/com.sun.jndi.ldap
             -->
           <argLine>@{argLine} -XX:+IgnoreUnrecognizedVMOptions -Dfile.encoding=UTF-8 --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED  --add-opens=java.desktop/sun.awt.image=ALL-UNNAMED --add-opens=java.naming/com.sun.jndi.ldap=ALL-UNNAMED</argLine>
@@ -1675,6 +1709,7 @@
         <groupId>org.codehaus.mojo</groupId>
         <artifactId>versions-maven-plugin</artifactId>
       </plugin>
+
     </plugins>
 
   </build>
@@ -2386,7 +2421,6 @@
         </plugins>
       </build>
     </profile>
-
   </profiles>
 
 </project>
