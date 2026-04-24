@@ -239,9 +239,14 @@
       <groupId>org.jasypt</groupId>
       <artifactId>jasypt-springsecurity3</artifactId>
     </dependency>
+    <!-- BouncyCastle FIPS dependencies for FIPS 140-3 compliance -->
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-lts8on</artifactId>
+      <artifactId>bc-fips</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-fips</artifactId>
     </dependency>
 
     <dependency>

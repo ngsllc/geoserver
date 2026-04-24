@@ -110,9 +110,14 @@
       <groupId>org.springframework.security</groupId>
       <artifactId>spring-security-web</artifactId>
     </dependency>
+    <!-- BouncyCastle FIPS (replaces bcprov-lts8on; cannot coexist with stock BC) -->
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-lts8on</artifactId>
+      <artifactId>bc-fips</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcpkix-fips</artifactId>
     </dependency>
     <dependency>
       <groupId>com.github.svenmeier.wicket-dnd</groupId>

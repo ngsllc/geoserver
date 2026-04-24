@@ -724,10 +724,26 @@
         <artifactId>jasypt-springsecurity3</artifactId>
         <version>${jasypt.version}</version>
       </dependency>
+      <!-- BouncyCastle FIPS dependencies for FIPS 140-3 compliance.
+           Replaces bcprov-lts8on: stock BC and bc-fips cannot share a classpath.
+           Note: bc-fips 2.1.2 is compatible with bcpkix-fips 2.1.x versions -->
       <dependency>
         <groupId>org.bouncycastle</groupId>
-        <artifactId>bcprov-lts8on</artifactId>
-        <version>2.73.10</version>
+        <artifactId>bc-fips</artifactId>
+        <version>2.1.2</version>
+      </dependency>
+      <dependency>
+        <groupId>org.bouncycastle</groupId>
+        <artifactId>bcpkix-fips</artifactId>
+        <version>2.1.10</version>
+      </dependency>
+      <!-- UnboundID in-memory LDAP test server (replaces ApacheDS, which
+           transitively pulls stock BouncyCastle and conflicts with bc-fips) -->
+      <dependency>
+        <groupId>com.unboundid</groupId>
+        <artifactId>unboundid-ldapsdk</artifactId>
+        <version>6.0.11</version>
+        <scope>test</scope>
       </dependency>
       <!-- wicket framework -->
       <dependency>
@@ -1405,6 +1421,27 @@
           <groupId>com.github.spotbugs</groupId>
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>4.9.7.0</version>
+        </plugin>
+        <!-- Copy BC-FIPS libs to fips-libs directory for packaging.
+             Declared in pluginManagement so it only runs in modules that
+             explicitly activate it (e.g., web/app WAR module). -->
+        <plugin>
+          <groupId>org.apache.maven.plugins</groupId>
+          <artifactId>maven-dependency-plugin</artifactId>
+          <executions>
+            <execution>
+              <id>copy-fips-libs</id>
+              <phase>prepare-package</phase>
+              <goals>
+                <goal>copy-dependencies</goal>
+              </goals>
+              <configuration>
+                <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
+                <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
+                <stripVersion>true</stripVersion>
+              </configuration>
+            </execution>
+          </executions>
         </plugin>
       </plugins>
     </pluginManagement>

@@ -7,9 +7,7 @@
 package org.geoserver.security.password;
 
 import java.io.IOException;
-import java.security.Security;
 import java.util.logging.Logger;
-import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geotools.util.logging.Logging;
@@ -34,9 +32,7 @@ public abstract class AbstractGeoserverPasswordEncoder implements GeoServerPassw
     private volatile boolean reversible = true;
     private String prefix;
 
-    static {
-        Security.addProvider(new BouncyCastleProvider());
-    }
+    // Avoid global provider side-effects; providers are registered on-demand elsewhere
 
     @Override
     public String getName() {

@@ -326,6 +326,11 @@
           <useTestScope>true</useTestScope>
         </configuration>
       </plugin>
+      <!-- Activate copy-fips-libs from pluginManagement for the WAR artifact -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-dependency-plugin</artifactId>
+      </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-war-plugin</artifactId>

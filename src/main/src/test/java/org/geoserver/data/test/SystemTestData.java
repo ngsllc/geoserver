@@ -49,6 +49,7 @@ import org.geoserver.ows.util.OwsUtils;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.platform.GeoServerExtensionsHelper;
 import org.geoserver.platform.GeoServerResourceLoader;
+import org.geoserver.security.KeyStoreProviderImpl;
 import org.geoserver.test.GeoServerSystemTestSupport;
 import org.geoserver.test.IOTestUtils;
 import org.geoserver.util.IOUtils;
@@ -84,6 +85,28 @@ public class SystemTestData extends CiteTestData {
     public static final QName MULTIBAND = new QName(WCS_URI, "multiband", WCS_PREFIX);
 
     static final Logger LOGGER = Logging.getLogger(SystemTestData.class);
+
+    /** Static cache for keystore type to avoid repeated environment lookups during test setup */
+    private static String cachedKeystoreType = null;
+
+    /**
+     * Gets the cached keystore type, initializing it if needed. This avoids repeated environment lookups during test
+     * setup.
+     */
+    private static String getCachedKeystoreType() {
+        if (cachedKeystoreType == null) {
+            cachedKeystoreType = KeyStoreProviderImpl.getKeyStoreType();
+        }
+        return cachedKeystoreType;
+    }
+
+    /**
+     * Resets the cached keystore type. This should be called when FIPS mode changes during tests to ensure the cache is
+     * invalidated and re-evaluated.
+     */
+    public static void resetCachedKeystoreType() {
+        cachedKeystoreType = null;
+    }
 
     /** Keys for overriding default layer properties */
     public static class LayerProperty<T> {
@@ -293,11 +316,46 @@ public class SystemTestData extends CiteTestData {
     public void setUpSecurity() throws IOException {
         File secDir = new File(getDataDirectoryRoot(), "security");
         IOUtils.decompress(SystemTestData.class.getResourceAsStream("security.zip"), secDir);
-        String javaVendor = System.getProperty("java.vendor");
-        if (javaVendor.contains("IBM")) {
-            IOUtils.copy(new File(secDir, "geoserver.jceks.ibm"), new File(secDir, "geoserver.jceks"));
+
+        // Get keystore type from environment or default to JCEKS
+        String keystoreType = getCachedKeystoreType();
+        String keystoreFileName = "geoserver." + keystoreType.toLowerCase();
+
+        // Copy appropriate keystore based on type and JVM vendor, with fallback to legacy formats
+        if (System.getProperty("java.vendor").contains("IBM")) {
+            // IBM JVMs often have different cryptographic provider behavior and keystore support
+            File ibmKeystore = new File(secDir, keystoreFileName + ".ibm");
+            File defaultKeystore = new File(secDir, keystoreFileName + ".default");
+            File targetKeystore = new File(secDir, keystoreFileName);
+
+            if (ibmKeystore.exists()) {
+                IOUtils.copy(ibmKeystore, targetKeystore);
+            } else if (defaultKeystore.exists()) {
+                IOUtils.copy(defaultKeystore, targetKeystore);
+            } else {
+                // Fallback to BCFKS files if dynamically determined format doesn't exist
+                File legacyIbm = new File(secDir, "geoserver.bcfks.ibm");
+                File legacyDefault = new File(secDir, "geoserver.bcfks.default");
+                if (legacyIbm.exists()) {
+                    IOUtils.copy(legacyIbm, targetKeystore);
+                } else if (legacyDefault.exists()) {
+                    IOUtils.copy(legacyDefault, targetKeystore);
+                }
+            }
         } else {
-            IOUtils.copy(new File(secDir, "geoserver.jceks.default"), new File(secDir, "geoserver.jceks"));
+            // For non-IBM JVMs (Oracle, OpenJDK, etc.), use default keystore due to consistent keystore behavior
+            File defaultKeystore = new File(secDir, keystoreFileName + ".default");
+            File targetKeystore = new File(secDir, keystoreFileName);
+
+            if (defaultKeystore.exists()) {
+                IOUtils.copy(defaultKeystore, targetKeystore);
+            } else {
+                // Fallback to legacy BCFKS file if new format doesn't exist
+                File legacyDefault = new File(secDir, "geoserver.bcfks.default");
+                if (legacyDefault.exists()) {
+                    IOUtils.copy(legacyDefault, targetKeystore);
+                }
+            }
         }
     }
 

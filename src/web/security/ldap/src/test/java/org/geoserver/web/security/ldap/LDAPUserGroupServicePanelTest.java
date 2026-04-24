@@ -5,30 +5,62 @@
  */
 package org.geoserver.web.security.ldap;
 
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertNull;
 
 import org.apache.wicket.Component;
 import org.apache.wicket.markup.html.panel.FeedbackPanel;
 import org.apache.wicket.model.CompoundPropertyModel;
 import org.apache.wicket.model.Model;
 import org.geoserver.security.ldap.LDAPUserGroupServiceConfig;
+import org.geoserver.security.ldap.UnboundIDLDAPTestServer;
+import org.geoserver.security.web.AbstractSecurityWicketTestSupport;
 import org.geoserver.web.ComponentBuilder;
 import org.geoserver.web.FormTestPage;
+import org.junit.AfterClass;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 /**
  * @author "Mauro Bartolomeoli - mauro.bartolomeoli@geo-solutions.it"
  * @author Niels Charlier
  */
-public class LDAPUserGroupServicePanelTest extends LDAPWicketTestSupport {
+public class LDAPUserGroupServicePanelTest extends AbstractSecurityWicketTestSupport {
+
+    private static final String GROUPS_BASE = "ou=Groups";
+
+    private static final String USERS_BASE = "ou=People";
+
+    private static final String GROUP_SEARCH_FILTER = "member=cn={0}";
+
+    private static final String AUTH_USER = "admin";
+
+    private static final String AUTH_PASSWORD = "secret";
+
+    private static final String ldapServerUrl = UnboundIDLDAPTestServer.LDAP_SERVER_URL;
+
+    private static final String basePath = UnboundIDLDAPTestServer.LDAP_BASE_PATH;
 
     LDAPUserGroupServicePanel current;
 
     LDAPUserGroupServiceConfig config;
 
     FeedbackPanel feedbackPanel = null;
+
+    @BeforeClass
+    public static void setUpLdapServer() throws Exception {
+        UnboundIDLDAPTestServer.startServer();
+    }
+
+    @AfterClass
+    public static void tearDownLdapServer() throws Exception {
+        UnboundIDLDAPTestServer.shutdownServer();
+    }
+
+    private String getServerURL() {
+        return ldapServerUrl + "/" + basePath;
+    }
 
     protected void setupPanel(boolean needsAuthentication, boolean setRequiredFields) {
         config = new LDAPUserGroupServiceConfig();
@@ -73,7 +105,6 @@ public class LDAPUserGroupServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testDataLoadedFromConfigurationWithoutAuthentication() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(false, true);
         checkBaseConfig();
 
@@ -83,7 +114,6 @@ public class LDAPUserGroupServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testRequiredFields() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(false, false);
 
         tester.newFormTester("form").submit();
@@ -96,7 +126,6 @@ public class LDAPUserGroupServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testDataLoadedFromConfigurationWithAuthentication() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(true, true);
         checkBaseConfig();
 
@@ -109,7 +138,6 @@ public class LDAPUserGroupServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testAuthenticationDisabled() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(false, true);
         tester.assertInvisible("form:panel:authenticationPanel");
         tester.newFormTester("form").setValue("panel:bindBeforeGroupSearch", "on");
@@ -119,7 +147,6 @@ public class LDAPUserGroupServicePanelTest extends LDAPWicketTestSupport {
 
     @Test
     public void testAuthenticationEnabled() throws Exception {
-        directoryService.setAllowAnonymousAccess(true);
         setupPanel(true, true);
         tester.assertVisible("form:panel:authenticationPanel");
         tester.newFormTester("form").setValue("panel:bindBeforeGroupSearch", "");

@@ -30,34 +30,17 @@
       <artifactId>gs-sec-ldap</artifactId>
       <version>${project.version}</version>
     </dependency>
+    <!-- UnboundID in-memory LDAP server — replaces ApacheDS, which transitively
+         pulls stock BouncyCastle and conflicts with bc-fips. bc-fips itself is
+         on the compile classpath transitively via gs-main. -->
     <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-jdbm-partition</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-core-integ</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-server-annotations</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.apache.directory.server</groupId>
-      <artifactId>apacheds-test-framework</artifactId>
+      <groupId>com.unboundid</groupId>
+      <artifactId>unboundid-ldapsdk</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
       <groupId>org.apache.wicket</groupId>
       <artifactId>wicket-tester</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-lts8on</artifactId>
       <scope>test</scope>
     </dependency>
     <dependency>
