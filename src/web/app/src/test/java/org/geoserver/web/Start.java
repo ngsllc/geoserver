@@ -26,10 +26,12 @@ import javax.naming.NamingException;
 import javax.security.auth.x500.X500Principal;
 import org.apache.commons.dbcp.BasicDataSource;
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.eclipse.jetty.ee10.webapp.WebAppContext;
 import org.eclipse.jetty.http.HttpVersion;
 import org.eclipse.jetty.plus.jndi.Resource;
 import org.eclipse.jetty.server.Connector;
@@ -39,9 +41,8 @@ import org.eclipse.jetty.server.SecureRequestCustomizer;
 import org.eclipse.jetty.server.Server;
 import org.eclipse.jetty.server.ServerConnector;
 import org.eclipse.jetty.server.SslConnectionFactory;
-import org.eclipse.jetty.util.resource.PathResource;
+import org.eclipse.jetty.util.resource.ResourceFactory;
 import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.eclipse.jetty.webapp.WebAppContext;
 import org.eclipse.jetty.xml.XmlConfiguration;
 
 /**
@@ -51,21 +52,10 @@ import org.eclipse.jetty.xml.XmlConfiguration;
  *
  * @author wolf
  */
+@SuppressWarnings("deprecation") // deep BouncyCastle API changes, need someone that understands it to replace
+// current code
 public class Start {
     private static final Logger log = org.geotools.util.logging.Logging.getLogger(Start.class.getName());
-
-    static {
-        // Register BCFIPS provider if not already registered
-        try {
-            Class<?> fipsProvider = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
-            if (Security.getProvider("BCFIPS") == null) {
-                Security.addProvider((java.security.Provider)
-                        fipsProvider.getDeclaredConstructor().newInstance());
-            }
-        } catch (Throwable e) {
-            // BC-FIPS provider not available, that's fine
-        }
-    }
 
     public static void main(String[] args) {
         final Server jettyServer = new Server();
@@ -110,14 +100,17 @@ public class Start {
             jettyServer.setHandler(wah);
             wah.setTempDirectory(new File("target/work"));
             // this allows to send large SLD's from the styles form
-            wah.getServletContext().getContextHandler().setMaxFormContentSize(1024 * 1024 * 5);
+            wah.setMaxFormContentSize(1024 * 1024 * 5);
             // this allows to configure hyperspectral images
-            wah.getServletContext().getContextHandler().setMaxFormKeys(2000);
+            wah.setMaxFormKeys(2000);
 
             String jettyConfigFile = System.getProperty("jetty.config.file");
             if (jettyConfigFile != null) {
                 log.info("Loading Jetty config from file: " + jettyConfigFile);
-                (new XmlConfiguration(PathResource.newResource(jettyConfigFile))).configure(jettyServer);
+                ResourceFactory rootResourceFactory = ResourceFactory.root();
+                org.eclipse.jetty.util.resource.Resource resource = rootResourceFactory.newResource(jettyConfigFile);
+                XmlConfiguration xmlConfiguration = new XmlConfiguration(resource);
+                xmlConfiguration.configure(jettyServer);
             }
 
             long start = System.currentTimeMillis();
@@ -191,12 +184,19 @@ public class Start {
         String sslHost = System.getProperty("ssl.hostname");
         ServerConnector https = null;
         if (sslHost != null && !sslHost.isEmpty()) {
+            // FIPS build: register the BouncyCastle FIPS provider (the stock
+            // BouncyCastleProvider is absent from bc-fips). Dev-only HTTPS path,
+            // gated behind -Dssl.hostname; reflective so it degrades if bc-fips
+            // is somehow off the classpath.
             try {
-                Security.addProvider((java.security.Provider)
-                        Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider")
-                                .newInstance());
+                if (Security.getProvider("BCFIPS") == null) {
+                    Security.addProvider((java.security.Provider)
+                            Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider")
+                                    .getDeclaredConstructor()
+                                    .newInstance());
+                }
             } catch (Throwable e) {
-                // BC-FIPS provider not available, will use default providers
+                // BC-FIPS provider not available; fall back to default providers
             }
             SslContextFactory.Server ssl = createSSLContextFactory(sslHost);
 
@@ -264,63 +264,44 @@ public class Start {
             privateKS.load(null);
         }
 
-        // create a RSA key pair generator using 2048 bits (FIPS-compliant key size)
+        // create a RSA key pair generator using 1024 bits
+
         KeyPairGenerator keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-        keyPairGenerator.initialize(2048);
-        KeyPair keyPair = keyPairGenerator.generateKeyPair();
+        keyPairGenerator.initialize(1024);
+        KeyPair KPair = keyPairGenerator.generateKeyPair();
 
-        // Generate self-signed certificate using BC-FIPS compatible API
-        try {
-            // Set validity to 10 years, issuer and subject are equal --> self signed certificate
-            int random = new SecureRandom().nextInt();
-            if (random < 0) random *= -1;
-            BigInteger serialNumber = BigInteger.valueOf(random);
+        // create a X509 certificate
+        // validity (10 years)
+        Date notBefore = new Date(System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 30);
+        Date notAfter = new Date(System.currentTimeMillis() + (1000L * 60 * 60 * 24 * 365 * 10));
+        // serial
+        BigInteger serial = new BigInteger(64, new SecureRandom()).abs();
 
-            Date notBefore = new Date(System.currentTimeMillis() - 1000L * 60 * 60 * 24 * 30);
-            Date notAfter = new Date(System.currentTimeMillis() + (1000L * 60 * 60 * 24 * 365 * 10));
+        // issuer == subject for self-signed
+        X500Name subject = new X500Name("CN=" + hostname + ", OU=None, O=None, L=None, C=None");
 
-            String distinguishedName = "CN=" + hostname + ", OU=None, O=None, L=None, C=None";
-            X500Name x500Name = new X500Name(distinguishedName);
+        X509v3CertificateBuilder certBuilder =
+                new JcaX509v3CertificateBuilder(subject, serial, notBefore, notAfter, subject, KPair.getPublic());
 
-            // Use the new BouncyCastle FIPS-compatible certificate builder
-            JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
-                    x500Name, serialNumber, notBefore, notAfter, x500Name, keyPair.getPublic());
+        // Sign (use SHA-256, not MD5)
+        ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA").build(KPair.getPrivate());
 
-            // Determine provider - prefer BCFIPS, fall back to BC
-            String provider = Security.getProvider("BCFIPS") != null ? "BCFIPS" : "BC";
-
-            // Use SHA256WithRSA instead of MD5WithRSA (FIPS-compliant)
-            ContentSigner signer = new JcaContentSignerBuilder("SHA256WithRSA")
-                    .setProvider(provider)
-                    .build(keyPair.getPrivate());
-
-            X509Certificate certificate =
-                    new JcaX509CertificateConverter().setProvider(provider).getCertificate(certBuilder.build(signer));
-
-            // Store the certificate containing the public key
-            File certFile = new File(keyStoreFile.getParentFile(), hostname + ".cert");
-            try (FileOutputStream fos = new FileOutputStream(certFile.getAbsoluteFile())) {
-                fos.write(certificate.getEncoded());
-            }
-
-            privateKS.setKeyEntry(
-                    hostname + ".key",
-                    keyPair.getPrivate(),
-                    password.toCharArray(),
-                    new java.security.cert.Certificate[] {certificate});
-
-            privateKS.setCertificateEntry(hostname + ".cert", certificate);
-
-            try (FileOutputStream fos = new FileOutputStream(keyStoreFile)) {
-                privateKS.store(fos, password.toCharArray());
-            }
-
-            log.info("Generated self-signed certificate for " + hostname + " using FIPS-compatible algorithms");
-        } catch (NoClassDefFoundError e) {
-            log.warning("BouncyCastle not available, skipping self-signed certificate generation");
-        } catch (Exception e) {
-            log.log(Level.WARNING, "Failed to generate self-signed certificate: " + e.getMessage(), e);
+        X509Certificate pkCertificate = new JcaX509CertificateConverter().getCertificate(certBuilder.build(signer));
+        // store the certificate containing the public key,this file is needed
+        // to import the public key in other key store.
+        File certFile = new File(keyStoreFile.getParentFile(), hostname + ".cert");
+        try (FileOutputStream fos = new FileOutputStream(certFile.getAbsoluteFile())) {
+            fos.write(pkCertificate.getEncoded());
         }
+
+        privateKS.setKeyEntry(
+                hostname + ".key", KPair.getPrivate(), password.toCharArray(), new java.security.cert.Certificate[] {
+                    pkCertificate
+                });
+
+        privateKS.setCertificateEntry(hostname + ".cert", pkCertificate);
+
+        privateKS.store(new FileOutputStream(keyStoreFile), password.toCharArray());
     }
 
     private static boolean keyStoreContainsCertificate(KeyStore ks, String hostname) throws Exception {
