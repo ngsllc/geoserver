@@ -20,6 +20,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.security.Provider;
+import java.security.Security;
+import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
@@ -96,11 +99,31 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
     /** Legacy algorithm (not FIPS-compliant) */
     static final String LEGACY_PBE_ALGORITHM = "PBEWithMD5AndDES";
 
+    /**
+     * Ensures the BC-FIPS provider is registered before using {@link #FIPS_PBE_ALGORITHM}, which BC-FIPS is the only
+     * provider to implement. Unlike {@link KeyStoreProviderImpl}, master password encryption always uses this algorithm
+     * regardless of whether overall FIPS mode is enabled, so registration can't be left to FIPS-mode-only code paths.
+     */
+    private static void ensureBcFipsProviderAvailable() {
+        if (Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null) return;
+        try {
+            Class<?> providerClass = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
+            Security.addProvider(
+                    (Provider) providerClass.getDeclaredConstructor().newInstance());
+        } catch (ReflectiveOperationException | SecurityException e) {
+            LOGGER.log(
+                    Level.WARNING,
+                    "Failed to register BC-FIPS provider; master password encryption may fail: " + e.getMessage());
+        }
+    }
+
     byte[] encode(char[] passwd) {
 
         if (!config.isEncrypting()) {
             return toBytes(passwd);
         }
+
+        ensureBcFipsProviderAvailable();
 
         // encrypt the password
         StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
@@ -160,6 +183,7 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             encryptor.setAlgorithm(algorithm);
             // FIPS algorithm also needs FIPS-compatible salt/IV generators for decryption
             if (FIPS_PBE_ALGORITHM.equals(algorithm)) {
+                ensureBcFipsProviderAvailable();
                 encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
                 encryptor.setIvGenerator(new FipsRandomIvGenerator());
             }
