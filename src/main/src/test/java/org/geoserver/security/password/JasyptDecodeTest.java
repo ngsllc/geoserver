@@ -13,8 +13,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
-import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
 import org.geotools.util.logging.Logging;
+import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
 import org.junit.Test;
 
 /** Test to verify Jasypt decryption behavior with different algorithm configurations. */
@@ -26,8 +26,8 @@ public class JasyptDecodeTest {
     private static final byte[] KEY = "geoserver".getBytes(StandardCharsets.UTF_8);
 
     /**
-     * Verify that the bundled master password file can be decoded with Jasypt defaults
-     * (PBEWithMD5AndDES). If the file format or key changes, this test must be updated.
+     * Verify that the bundled master password file can be decoded with Jasypt defaults (PBEWithMD5AndDES). If the file
+     * format or key changes, this test must be updated.
      */
     @Test
     public void testDecodeActualTestData() throws Exception {

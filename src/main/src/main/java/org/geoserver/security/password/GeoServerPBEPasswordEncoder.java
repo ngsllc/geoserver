@@ -36,8 +36,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  */
 public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncoder {
 
-    private static final Logger LOGGER =
-            Logger.getLogger(GeoServerPBEPasswordEncoder.class.getName());
+    private static final Logger LOGGER = Logger.getLogger(GeoServerPBEPasswordEncoder.class.getName());
 
     /** Algorithms that are NOT FIPS-compliant and cannot be used when FIPS mode is enabled */
     private static final Set<String> NON_FIPS_ALGORITHMS =
@@ -138,33 +137,33 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
                 byteEncrypter.setProviderName(getProviderName());
             byteEncrypter.setAlgorithm(getAlgorithm());
 
-        // Return the encoder; the finally block below scrambles password/chars.
-        // This is safe because Jasypt's setPasswordCharArray() copies the array internally.
-        return new CharArrayPasswordEncoder() {
-            @Override
-            public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
-                byte[] decoded = Base64.getDecoder().decode(encPass.getBytes());
-                byte[] decrypted = byteEncrypter.decrypt(decoded);
+            // Return the encoder; the finally block below scrambles password/chars.
+            // This is safe because Jasypt's setPasswordCharArray() copies the array internally.
+            return new CharArrayPasswordEncoder() {
+                @Override
+                public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
+                    byte[] decoded = Base64.getDecoder().decode(encPass.getBytes());
+                    byte[] decrypted = byteEncrypter.decrypt(decoded);
 
-                char[] chars = toChars(decrypted);
-                try {
-                    return Arrays.equals(chars, rawPass);
-                } finally {
-                    scramble(decrypted);
-                    scramble(chars);
+                    char[] chars = toChars(decrypted);
+                    try {
+                        return Arrays.equals(chars, rawPass);
+                    } finally {
+                        scramble(decrypted);
+                        scramble(chars);
+                    }
                 }
-            }
 
-            @Override
-            public String encodePassword(char[] rawPass, Object salt) {
-                byte[] bytes = toBytes(rawPass);
-                try {
-                    return new String(Base64.getEncoder().encode(byteEncrypter.encrypt(bytes)));
-                } finally {
-                    scramble(bytes);
+                @Override
+                public String encodePassword(char[] rawPass, Object salt) {
+                    byte[] bytes = toBytes(rawPass);
+                    try {
+                        return new String(Base64.getEncoder().encode(byteEncrypter.encrypt(bytes)));
+                    } finally {
+                        scramble(bytes);
+                    }
                 }
-            }
-        };
+            };
         } finally {
             scramble(password);
             scramble(chars);
@@ -191,11 +190,13 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
             // In FIPS mode this is a real problem — the algorithm will likely fail downstream.
             // In non-FIPS mode it's acceptable to fall back to default providers.
             if (KeyStoreProviderImpl.isFipsMode()) {
-                LOGGER.log(Level.WARNING,
+                LOGGER.log(
+                        Level.WARNING,
                         "Failed to register requested security provider '" + requested
                                 + "' in FIPS mode. Encryption operations may fail: " + e.getMessage());
             } else {
-                LOGGER.log(Level.FINE,
+                LOGGER.log(
+                        Level.FINE,
                         "Provider '" + requested + "' not available, falling back to default JCA providers");
             }
         }
