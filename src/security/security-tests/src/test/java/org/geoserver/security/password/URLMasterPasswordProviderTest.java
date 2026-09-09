@@ -43,6 +43,12 @@ public class URLMasterPasswordProviderTest extends GeoServerSecurityTestSupport 
 
     @Test
     public void testLegacyFileIsMigrated() throws Exception {
+        // the legacy algorithm is blocked by the JVM on an OS-level FIPS host
+        try {
+            javax.crypto.Cipher.getInstance(URLMasterPasswordProvider.LEGACY_PBE_ALGORITHM);
+        } catch (Exception e) {
+            org.junit.Assume.assumeNoException("legacy PBE algorithm not available on this JVM", e);
+        }
         assertMigratedFrom(URLMasterPasswordProvider.LEGACY_PBE_ALGORITHM);
     }
 
