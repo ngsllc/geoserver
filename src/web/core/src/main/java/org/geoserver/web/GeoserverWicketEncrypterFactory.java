@@ -17,6 +17,9 @@ import org.apache.wicket.util.crypt.ICrypt;
 import org.apache.wicket.util.crypt.ICryptFactory;
 import org.geoserver.platform.GeoServerExtensions;
 import org.geoserver.security.GeoServerSecurityManager;
+import org.geoserver.security.KeyStoreProviderImpl;
+import org.geoserver.security.password.FipsRandomIvGenerator;
+import org.geoserver.security.password.FipsRandomSaltGenerator;
 import org.geotools.util.logging.Logging;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
 
@@ -30,6 +33,29 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
     static ICryptFactory Factory;
     protected static Logger LOGGER = Logging.getLogger("org.geoserver.security");
     static final String ICRYPT_ATTR_NAME = "__ICRYPT";
+
+    /** Strong algorithm used for URL parameter encryption, provided by BCFIPS */
+    static final String FIPS_PBE_ALGORITHM = KeyStoreProviderImpl.FIPS_PBE_ALGORITHM;
+
+    /** Jasypt default, only used in non-FIPS mode when BCFIPS is not available */
+    static final String FALLBACK_ALGORITHM = "PBEWITHMD5ANDDES";
+
+    /**
+     * Builds an encryptor for the given key and algorithm. Uses FIPS-compatible salt and IV generators instead of
+     * Jasypt's defaults which use SHA1PRNG. The BCFIPS provider is pinned when it is available so that the lookup does
+     * not depend on provider ordering.
+     */
+    static StandardPBEByteEncryptor newEncryptor(char[] key, String algorithm, boolean useBcFips) {
+        StandardPBEByteEncryptor enc = new StandardPBEByteEncryptor();
+        enc.setPasswordCharArray(key);
+        enc.setSaltGenerator(new FipsRandomSaltGenerator());
+        enc.setIvGenerator(new FipsRandomIvGenerator());
+        enc.setAlgorithm(algorithm);
+        if (useBcFips) {
+            enc.setProviderName(KeyStoreProviderImpl.BCFIPS_PROVIDER);
+        }
+        return enc;
+    }
 
     ICrypt NoCrypt = new ICrypt() {
 
@@ -97,35 +123,26 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
         GeoServerSecurityManager manager = GeoServerApplication.get().getSecurityManager();
         char[] key = manager.getRandomPassworddProvider().getRandomPasswordWithDefaultLength();
 
-        StandardPBEByteEncryptor enc = new StandardPBEByteEncryptor();
-        enc.setPasswordCharArray(key);
-        // Use FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
-        enc.setSaltGenerator(new org.geoserver.security.password.FipsRandomSaltGenerator());
-        enc.setIvGenerator(new org.geoserver.security.password.FipsRandomIvGenerator());
-
-        // Use FIPS-compatible algorithm — PBEWITHSHA256AND256BITAES-BC works in both
-        // FIPS and non-FIPS modes. Fall back to weaker algorithm only if the strong one
-        // is not available AND we are NOT on a FIPS host (MD5+DES are blocked in FIPS).
+        // The strong algorithm is provided by BCFIPS only, so register the provider first. This works in both
+        // FIPS and non-FIPS mode as long as bc-fips is on the classpath. Fall back to the weaker Jasypt default
+        // only if the strong one is not available AND we are NOT on a FIPS host (MD5+DES are blocked in FIPS).
+        StandardPBEByteEncryptor enc;
         try {
-            enc.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
+            enc = newEncryptor(key, FIPS_PBE_ALGORITHM, KeyStoreProviderImpl.ensureBcFipsProviderRegistered());
             // Force initialization to detect unavailable algorithm early
             enc.initialize();
         } catch (Exception e) {
-            if (org.geoserver.security.KeyStoreProviderImpl.isFipsMode()) {
+            if (KeyStoreProviderImpl.isFipsMode()) {
                 // On a FIPS host the only safe option is NoCrypt — MD5/DES are blocked
                 manager.disposePassword(key);
-                LOGGER.severe("PBEWITHSHA256AND256BITAES-BC not available and FIPS mode is active; "
+                LOGGER.severe(FIPS_PBE_ALGORITHM + " not available and FIPS mode is active; "
                         + "URL parameter encryption disabled: " + e.getMessage());
                 s.setAttribute(ICRYPT_ATTR_NAME, NoCrypt);
                 return NoCrypt;
             }
-            LOGGER.warning("PBEWITHSHA256AND256BITAES-BC not available for URL parameter encryption, "
-                    + "falling back to PBEWITHMD5ANDDES: " + e.getMessage());
-            enc = new StandardPBEByteEncryptor();
-            enc.setPasswordCharArray(key);
-            enc.setSaltGenerator(new org.geoserver.security.password.FipsRandomSaltGenerator());
-            enc.setIvGenerator(new org.geoserver.security.password.FipsRandomIvGenerator());
-            enc.setAlgorithm("PBEWITHMD5ANDDES");
+            LOGGER.warning(FIPS_PBE_ALGORITHM + " not available for URL parameter encryption, falling back to "
+                    + FALLBACK_ALGORITHM + ": " + e.getMessage());
+            enc = newEncryptor(key, FALLBACK_ALGORITHM, false);
         }
         // Dispose key after both paths have copied it via setPasswordCharArray
         manager.disposePassword(key);

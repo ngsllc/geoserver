@@ -17,7 +17,7 @@ GeoServer includes a FIPS-aware keystore provider that can operate in FIPS-enabl
 On systems with OS-level FIPS enabled, GeoServer automatically operates in FIPS mode without any additional configuration. The ``FIPS_MODE`` setting cannot disable FIPS on these systems.
 
 FIPS KeyStore Provider
----------------------
+----------------------
 
 GeoServer's keystore provider automatically:
 
@@ -28,7 +28,7 @@ GeoServer's keystore provider automatically:
 * Configures appropriate keystore types for FIPS environments
 
 Configuration
-------------
+-------------
 
 Environment Variable
 ~~~~~~~~~~~~~~~~~~~~
@@ -46,10 +46,12 @@ When ``FIPS_MODE=true``, GeoServer automatically:
 
 When ``FIPS_MODE=false`` or unset:
 * Uses JCEKS keystore format
-* Uses standard Java cryptographic providers
+* Uses standard Java cryptographic providers for the keystore
+* Still registers the BouncyCastle FIPS provider on demand, because the master password file, ``crypt2:``
+  passwords and URL parameter encryption always use the FIPS algorithm (see below)
 
 Keystore Types
--------------
+--------------
 
 GeoServer automatically selects the keystore type based on FIPS mode:
 
@@ -59,12 +61,17 @@ GeoServer automatically selects the keystore type based on FIPS mode:
 Providers
 ---------
 
-The FIPS keystore provider uses:
+GeoServer uses two providers:
 
-* **BCFIPS**: BouncyCastle FIPS provider (used in FIPS mode)
-* **SunJCE**: Java default provider (used in non-FIPS mode)
+* **BCFIPS**: BouncyCastle FIPS provider. Used for the BCFKS keystore in FIPS mode, and in **both** modes for the
+  strong password encoder (``crypt2:``), the encrypted master password file and URL parameter encryption. These
+  all use ``PBEWITHSHA256AND256BITAES-BC``, an algorithm name that only BCFIPS registers.
+* **SunJCE**: Java default provider. Used for the JCEKS keystore in non-FIPS mode.
 
-The appropriate provider is automatically selected based on the ``FIPS_MODE`` setting.
+BCFIPS is registered automatically the first time it is needed, so no ``java.security`` configuration is
+required. It is appended with the lowest priority, so algorithms the JDK also provides keep resolving to the
+JDK providers. The ``bc-fips`` and ``bcpkix-fips`` JARs must therefore be on the classpath in both modes; they
+are included in the GeoServer distribution.
 
 Automatic Keystore Migration
 ----------------------------
@@ -129,7 +136,7 @@ To enable FIPS mode:
    FIPS_MODE=true ./bin/startup.sh
 
 Verification
------------
+------------
 
 You can verify FIPS mode is active by checking the GeoServer logs for messages like:
 
@@ -139,10 +146,10 @@ You can verify FIPS mode is active by checking the GeoServer logs for messages l
    INFO - Successfully registered standard BouncyCastle provider as fallback
 
 Troubleshooting
---------------
+---------------
 
 Common Issues
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 1. **FIPS Provider Not Available**
    
@@ -160,7 +167,20 @@ Common Issues
    * Check that the cryptographic provider is available
    * Review the GeoServer logs for detailed error messages
 
-3. **Password Encoder Not Available (crypt1: passwords)**
+3. **Master Password Cannot Be Decrypted**
+
+   If GeoServer fails to start with ``Failed to decrypt master password with [PBEWITHSHA256AND256BITAES-BC,
+   PBEWithHmacSHA256AndAES_128, PBEWithMD5AndDES]``, none of the known algorithms could read the master password
+   file (``security/masterpw/default/passwd``):
+
+   * On a FIPS-enabled operating system the usual cause is a file still encrypted with the legacy
+     ``PBEWithMD5AndDES`` algorithm, which the OS blocks. Follow the
+     :ref:`Password Migration <fips_password_migration>` procedure: one start on a host without OS-level FIPS
+     re-encrypts the file automatically.
+   * Otherwise the file is corrupt or was written by a different GeoServer. Restore ``passwd.backup`` if one
+     exists, or delete the ``security`` directory to start fresh.
+
+4. **Password Encoder Not Available (crypt1: passwords)**
    
    If you see errors about password encoders or ``crypt1:`` prefixed passwords failing in FIPS mode:
    
@@ -170,7 +190,7 @@ Common Issues
    
    See the :ref:`Password Migration <fips_password_migration>` section below for instructions.
 
-4. **Performance Issues**
+5. **Performance Issues**
    
    FIPS-compliant cryptographic operations may be slower than standard operations:
    
@@ -190,7 +210,7 @@ To enable debug logging for FIPS operations, add the following to your logging c
    org.geoserver.security.KeyStoreProviderImpl=DEBUG
 
 Security Considerations
----------------------
+-----------------------
 
 * **Password Management**: Always use strong passwords for keystores in FIPS environments
 * **Key Storage**: Store cryptographic keys securely and rotate them regularly
@@ -199,7 +219,7 @@ Security Considerations
 * **Compliance**: Ensure all cryptographic operations meet your organization's compliance requirements
 
 Compliance Standards
--------------------
+--------------------
 
 The FIPS keystore provider is designed to support:
 
@@ -224,21 +244,36 @@ cannot be read once MD5 and DES are blocked.
 **Understanding Password Prefixes:**
 
 * ``crypt1:`` — Passwords encoded with weak ``PBEWITHMD5ANDDES`` algorithm (NOT FIPS-compliant)
-* ``crypt2:`` — Passwords encoded with strong ``PBEWITHSHA256AND256BITAES-CBC-BC`` algorithm (FIPS-compliant)
+* ``crypt2:`` — Passwords encoded with strong ``PBEWITHSHA256AND256BITAES-BC`` algorithm (FIPS-compliant,
+  provided by the BouncyCastle FIPS provider)
 
 **What auto-migrates and what does not:**
 
 +-------------------------------+----------------+---------------------------------------------------+
 | Artifact                      | Auto-migrated? | Details                                           |
 +===============================+================+===================================================+
-| Keystore (JCEKS → BCFKS)      | Yes            | Backup created, keys copied, old file removed     |
+| Keystore (JCEKS → BCFKS)      | Yes            | Backup created, keys copied unchanged (legacy     |
+|                               |                | keys are stored as ``HmacSHA256`` entries), old   |
+|                               |                | file removed                                      |
 +-------------------------------+----------------+---------------------------------------------------+
-| Master password file          | Yes            | Re-encrypted from ``PBEWithMD5AndDES`` to          |
-|                               |                | ``PBEWithHmacSHA256AndAES_128``; atomic write      |
+| Master password file          | Yes            | Re-encrypted from ``PBEWithMD5AndDES`` (or        |
+|                               |                | ``PBEWithHmacSHA256AndAES_128``, used by earlier  |
+|                               |                | FIPS builds) to ``PBEWITHSHA256AND256BITAES-BC``; |
+|                               |                | backup kept, atomic write                         |
 +-------------------------------+----------------+---------------------------------------------------+
-| ``crypt1:`` user/data-store   | **No**         | Must be re-entered via the web UI or REST API     |
-| passwords                     |                | after migration                                   |
+| Configuration password        | Yes            | Switched to ``strongPbePasswordEncoder`` if the   |
+| encoder                       |                | weak encoder is configured (FIPS mode only)       |
 +-------------------------------+----------------+---------------------------------------------------+
+| ``crypt2:`` passwords         | Not needed     | Values written by earlier GeoServer versions      |
+|                               |                | stay readable; new values use the same format     |
++-------------------------------+----------------+---------------------------------------------------+
+| ``crypt1:`` user/data-store   | **No**         | Readable in non-FIPS mode only. Must be           |
+| passwords                     |                | re-entered via the web UI or REST API             |
++-------------------------------+----------------+---------------------------------------------------+
+
+Passwords are encrypted with a key kept in the keystore. Keys created by earlier GeoServer versions and keys created
+with FIPS support use a slightly different on-disk format; GeoServer tells them apart by the key itself, so a data
+directory keeps one consistent format per key and nothing has to be re-encrypted when upgrading.
 
 Migration Steps (Recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -264,12 +299,15 @@ Migration Steps (Recommended)
    On startup GeoServer will:
 
    * Register the BouncyCastle FIPS provider (BCFIPS)
-   * Detect the legacy JCEKS keystore and migrate it to BCFKS format
+   * Switch the configuration password encoder to ``strongPbePasswordEncoder`` if the weak
+     ``pbePasswordEncoder`` is configured, logging a warning
+   * Detect the legacy JCEKS keystore and migrate it to BCFKS format, preserving the keys
    * Detect the legacy master-password encryption and re-encrypt with
-     ``PBEWithHmacSHA256AndAES_128``
+     ``PBEWITHSHA256AND256BITAES-BC``, keeping a ``.backup`` copy of the original file
    * Log each migration step at INFO level
 
-3. **Re-enter any** ``crypt1:`` **passwords** through the GeoServer web admin:
+3. **Re-enter any** ``crypt1:`` **passwords** through the GeoServer web admin. Passwords already
+   stored as ``crypt2:`` need no action:
 
    * Data store connection passwords
    * OGC service credentials
@@ -291,8 +329,10 @@ Migration Steps (Recommended)
 
    .. code-block:: text
 
-      INFO  ... Master password was encrypted with legacy algorithm, migrating to FIPS-compatible algorithm
-      INFO  ... Keystore migrated from JCEKS to BCFKS
+      WARN  ... FIPS mode: the configuration password encoder 'pbePasswordEncoder' uses an algorithm that is not available in FIPS mode, switching to 'strongPbePasswordEncoder'
+      INFO  ... Master password was encrypted with PBEWithMD5AndDES, migrating to PBEWITHSHA256AND256BITAES-BC
+      INFO  ... Successfully migrated master password to PBEWITHSHA256AND256BITAES-BC
+      INFO  ... Keystore migration completed: JCEKS -> BCFKS
 
 5. **Stop GeoServer**, then **re-enable OS-level FIPS** and reboot:
 
@@ -312,16 +352,20 @@ Migration Steps (Recommended)
 
       ./bin/startup.sh
 
-   GeoServer will log:
+   GeoServer registers the BCFIPS provider at startup and logs:
 
    .. code-block:: text
 
-      INFO  ... OS-level FIPS is enabled, FIPS mode activated
+      INFO  ... Successfully registered BouncyCastle FIPS provider
+
+   The Modules tab of the Server Status page shows the ``FIPS Mode`` module with
+   ``FIPS Mode: ENABLED`` and ``Keystore Type: BCFKS``.
 
 Manual Migration (Alternative)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you prefer manual control, you can update the security configuration directly:
+In FIPS mode the switch to the strong encoder happens automatically at startup. If you prefer to do it
+before enabling FIPS mode, or on a non-FIPS host, you can update the security configuration directly:
 
 1. Edit ``<data-dir>/security/config.xml`` and change:
 
@@ -345,3 +389,10 @@ If you prefer manual control, you can update the security configuration directly
 * Attempting to use the weak password encoder in FIPS mode will result in a startup error
 * The ``bc-fips`` and ``bcpkix-fips`` JARs **must** be on the classpath for FIPS mode to work
 * There is no automatic migration of ``crypt1:`` passwords — they must be re-entered
+* Data directories migrated by a FIPS build older than this one may hold a BCFKS keystore whose keys were
+  stored as AES entries of the wrong size and cannot be read (``Provided key data wrong size for AES``).
+  Restore the keystore from ``security/geoserver.jceks.backup`` (rename it to ``geoserver.jceks`` and
+  delete ``geoserver.bcfks``), then restart: the migration runs again and keeps the keys readable
+* The master password file is also migrated when GeoServer runs **without** ``FIPS_MODE``: the
+  BouncyCastle FIPS provider is registered on demand for the master password in both modes, so a
+  data directory can be prepared on a regular host and then moved to a FIPS host

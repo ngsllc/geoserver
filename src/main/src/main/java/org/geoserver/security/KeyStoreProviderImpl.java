@@ -51,6 +51,25 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     public static final String BCFIPS_PROVIDER = "BCFIPS";
     public static final String DEFAULT_SECRET_KEY_ALGORITHM = "AES";
 
+    /**
+     * Algorithm label under which secret keys created by earlier GeoServer versions are stored in a BCFKS keystore.
+     * Those keys are the raw bytes of a random password (40 bytes by default) labelled "PBE", which BCFKS does not
+     * accept, and they are not a valid AES key size either. HMAC keys may have any length and HMAC-SHA256 is FIPS
+     * approved, so the label keeps the key storable while preserving its bytes, which is what keeps data encrypted with
+     * the key readable (see {@code GeoServerPBEPasswordEncoder}).
+     */
+    public static final String LEGACY_SECRET_KEY_ALGORITHM = "HmacSHA256";
+
+    /**
+     * Strong password based encryption algorithm used for the master password file, the {@code crypt2} password encoder
+     * and Wicket URL parameter encryption. This is the PKCS#12 PBE scheme (SHA-256 KDF, AES-256/CBC) as registered by
+     * the BouncyCastle FIPS provider; it is only resolvable once {@link #BCFIPS_PROVIDER} is registered, see
+     * {@link #ensureBcFipsProviderRegistered()}.
+     */
+    public static final String FIPS_PBE_ALGORITHM = "PBEWITHSHA256AND256BITAES-BC";
+
+    private static final String BCFIPS_PROVIDER_CLASS = "org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider";
+
     // Dynamic file names based on keystore type
     private String defaultFileName;
     private String preparedFileName;
@@ -130,6 +149,24 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 || upper.equals("HMACSHA384")
                 || upper.equals("HMACSHA512")
                 || (upper.startsWith("PBEWITHHMACSHA") && upper.contains("AES"));
+    }
+
+    /**
+     * Returns a secret key that a BCFKS keystore accepts, preserving the key bytes. Keys created by this version are
+     * AES keys and are returned as is; keys created by earlier GeoServer versions carry the "PBE" label and are
+     * relabelled with {@link #LEGACY_SECRET_KEY_ALGORITHM}. The label is also what {@code GeoServerPBEPasswordEncoder}
+     * uses to tell the two generations of keys apart.
+     */
+    static SecretKey toBcfksSecretKey(SecretKey key) {
+        if (isFipsApprovedAlgorithm(key.getAlgorithm())) {
+            return key;
+        }
+        byte[] encoded = key.getEncoded();
+        if (encoded == null) {
+            throw new IllegalArgumentException(
+                    "Cannot store key of type " + key.getAlgorithm() + ", encoding not available");
+        }
+        return new SecretKeySpec(encoded, LEGACY_SECRET_KEY_ALGORITHM);
     }
 
     /**
@@ -268,42 +305,59 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         return BCFKS_KEYSTORE_TYPE;
     }
 
+    /**
+     * Registers the BouncyCastle FIPS provider ({@value #BCFIPS_PROVIDER}) with the JCA if it is on the classpath and
+     * not registered yet. The provider is appended with the lowest priority, so algorithms also offered by the JDK
+     * providers keep resolving to those; only BC specific names such as {@link #FIPS_PBE_ALGORITHM} resolve to BCFIPS.
+     *
+     * <p>Safe to call from any code path that needs a BCFIPS-only algorithm, in both FIPS and non-FIPS mode. Callers
+     * that cannot work without the provider should check the return value.
+     *
+     * @return {@code true} if the BCFIPS provider is registered after this call, {@code false} if it is not available
+     */
+    public static synchronized boolean ensureBcFipsProviderRegistered() {
+        if (Security.getProvider(BCFIPS_PROVIDER) != null) {
+            return true;
+        }
+        try {
+            Class<?> providerClass = Class.forName(BCFIPS_PROVIDER_CLASS);
+            java.security.Provider bcProvider = (java.security.Provider)
+                    providerClass.getDeclaredConstructor().newInstance();
+            Security.addProvider(bcProvider);
+            LOGGER.info("Successfully registered BouncyCastle FIPS provider");
+            return true;
+        } catch (ClassNotFoundException e) {
+            LOGGER.log(
+                    isFipsMode() ? Level.SEVERE : Level.FINE,
+                    "BouncyCastle FIPS provider not available in classpath. Ensure bc-fips dependency is included.");
+            return false;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle FIPS provider: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
     private void ensureProviderAvailable(String keystoreType, String provider) {
         if (!BCFKS_KEYSTORE_TYPE.equals(keystoreType)) {
             return;
         }
-        if (provider != null && java.security.Security.getProvider(provider) == null) {
-            try {
-                if (BCFIPS_PROVIDER.equals(provider)) {
-                    // Load BouncyCastle FIPS provider
-                    try {
-                        Class<?> providerClass =
-                                Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
-                        java.security.Provider bcProvider = (java.security.Provider)
-                                providerClass.getDeclaredConstructor().newInstance();
-                        java.security.Security.addProvider(bcProvider);
-                        LOGGER.info("Successfully registered BouncyCastle FIPS provider");
-
-                        // Validate that the provider supports required algorithms
-                        validateProviderSupport(bcProvider);
-                    } catch (ClassNotFoundException e) {
-                        LOGGER.log(
-                                Level.SEVERE,
-                                "BouncyCastle FIPS provider not available in classpath. "
-                                        + "Ensure bc-fips dependency is included.",
-                                e);
-                        throw new RuntimeException("BouncyCastle FIPS provider required but not available", e);
-                    } catch (Exception e) {
-                        LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle FIPS provider: " + e.getMessage(), e);
-                        throw new RuntimeException("Failed to register BouncyCastle FIPS provider", e);
-                    }
-                }
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle provider: " + e.getMessage(), e);
-                throw new RuntimeException("Failed to register BouncyCastle provider", e);
-            }
+        if (provider == null || Security.getProvider(provider) != null) {
+            return;
+        }
+        if (!BCFIPS_PROVIDER.equals(provider)) {
+            return;
+        }
+        if (!ensureBcFipsProviderRegistered()) {
+            throw new RuntimeException("BouncyCastle FIPS provider required but not available");
+        }
+        try {
+            // Validate that the freshly registered provider supports required algorithms
+            validateProviderSupport(Security.getProvider(BCFIPS_PROVIDER));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to validate BouncyCastle FIPS provider: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to validate BouncyCastle FIPS provider", e);
         }
     }
 
@@ -359,19 +413,19 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 // Always normalize SecretKeys to SecretKeySpec for cross-keystore compatibility
                 // JCEKS needs this to avoid serialization filter issues
                 // BCFKS needs this because it can't store PBE-wrapped keys
-                if (key instanceof SecretKey) {
+                if (key instanceof SecretKey secretKey) {
                     byte[] encoded = key.getEncoded();
                     if (encoded != null) {
                         // For BCFKS in FIPS mode, we must use a FIPS-approved algorithm name
                         // BCFKS rejects keys with PBE algorithm names like "PBEWithMD5AndDES"
-                        String targetAlgorithm = key.getAlgorithm();
-                        if ("BCFKS".equals(target.getType()) && !isFipsApprovedAlgorithm(targetAlgorithm)) {
-                            targetAlgorithm = DEFAULT_SECRET_KEY_ALGORITHM; // Use AES
-                        }
-                        key = new SecretKeySpec(encoded, targetAlgorithm);
+                        // BCFKS rejects non FIPS algorithm names and enforces AES key sizes; relabel legacy keys
+                        // while preserving their bytes so that data encrypted with them stays readable
+                        key = "BCFKS".equals(target.getType())
+                                ? toBcfksSecretKey(secretKey)
+                                : new SecretKeySpec(encoded, key.getAlgorithm());
                         LOGGER.log(
                                 Level.FINE,
-                                "Normalized key '" + alias + "' to SecretKeySpec with algorithm " + targetAlgorithm);
+                                "Normalized key '" + alias + "' to SecretKeySpec with algorithm " + key.getAlgorithm());
                     } else {
                         LOGGER.log(Level.SEVERE, "Cannot normalize key '" + alias + "' - getEncoded() returned null.");
                         throw new Exception("Cannot migrate key '" + alias + "' - key encoding is not available");
@@ -949,9 +1003,10 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 Key key = oldKS.getKey(alias, oldPassword);
                 KeyStore.Entry entry = null;
                 if (key instanceof SecretKey secretKey) {
-                    // Normalize SecretKeys for BCFKS: non-FIPS algorithms are rejected
-                    if (BCFKS_KEYSTORE_TYPE.equals(targetType) && !isFipsApprovedAlgorithm(secretKey.getAlgorithm())) {
-                        secretKey = deriveAesKey(secretKey.getEncoded());
+                    // BCFKS rejects non-FIPS algorithm names: relabel legacy keys, preserving their bytes so that
+                    // passwords encrypted with them stay readable after the master password change
+                    if (BCFKS_KEYSTORE_TYPE.equals(targetType)) {
+                        secretKey = toBcfksSecretKey(secretKey);
                     }
                     entry = new KeyStore.SecretKeyEntry(secretKey);
                 }
