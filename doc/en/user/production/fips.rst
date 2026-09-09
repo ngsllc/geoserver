@@ -190,9 +190,11 @@ Check that FIPS mode is active by examining the GeoServer logs:
 
 .. code-block:: text
 
-   INFO [geoserver.security] - FIPS mode enabled
-   INFO [geoserver.security] - Using BCFKS keystore format
-   INFO [geoserver.security] - BouncyCastle FIPS provider registered
+   INFO [geoserver.security] - Successfully registered BouncyCastle FIPS provider
+   INFO [geoserver.security] - Keystore migration completed: JCEKS -> BCFKS
+
+The second line only appears the first time an existing JCEKS keystore is migrated. The Modules tab of the
+Server Status page also reports the FIPS mode and keystore type in use.
 
 **Important**: For complete FIPS compliance, ensure that the operating system is also configured for FIPS mode. GeoServer's FIPS implementation works in conjunction with OS-level FIPS settings to provide comprehensive security compliance.
 
@@ -213,10 +215,20 @@ Implementation Details
 Provider Registration
 ~~~~~~~~~~~~~~~~~~~
 
-The FIPS implementation automatically registers the BouncyCastle FIPS provider when needed:
+The BouncyCastle FIPS provider (``BCFIPS``) is registered on demand by ``KeyStoreProviderImpl`` the first time
+it is needed, in both FIPS and non-FIPS mode:
 
-* **BCFIPS Provider**: Used for all BouncyCastle cryptographic operations
-* **Automatic Detection**: The system automatically registers the BCFIPS provider if not already available
+* **BCFKS keystore**: FIPS mode only
+* **Strong password encoder** (``crypt2:``), **master password file** and **URL parameter encryption**: both
+  modes. They use ``PBEWITHSHA256AND256BITAES-BC``, which only BCFIPS provides.
+
+The provider is appended with the lowest priority, so algorithm names the JDK also provides keep resolving to
+the JDK providers. Because registration happens on demand, no ``java.security`` changes are needed, but the
+``bc-fips`` and ``bcpkix-fips`` JARs must be on the classpath even when FIPS mode is off.
+
+The algorithm and provider used by the strong password encoder can be overridden with the system properties
+``geoserver.encryption.algorithm`` and ``geoserver.encryption.provider``. The master password file and URL
+parameter encryption always use the built-in algorithm.
 
 FIPS Detection Priority
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -276,6 +288,10 @@ If you have an existing GeoServer data directory that was created without FIPS m
 you must migrate it **before** enabling OS-level FIPS. Once the OS enforces FIPS, the JVM
 blocks MD5 and DES entirely, making the legacy artifacts unreadable.
 
+The master password file is re-encrypted automatically on the first start, whether or not
+``FIPS_MODE`` is set. Files written by earlier FIPS builds with ``PBEWithHmacSHA256AndAES_128``
+are migrated the same way. A ``passwd.backup`` copy of the previous file is kept next to it.
+
 See :ref:`fips_password_migration` in the Security section for the full step-by-step procedure.
 The short version:
 
@@ -309,11 +325,18 @@ Check that the environment variables are set correctly and that the BouncyCastle
 
 Ensure that the source keystore password is correct and that the target directory is writable. The target keystore will be created automatically if it doesn't exist.
 
-**Master password cannot be decrypted in FIPS mode**
+**Master password cannot be decrypted**
 
-If GeoServer fails to start with ``Failed to decrypt master password in FIPS mode``, the master
-password file is still encrypted with the legacy ``PBEWithMD5AndDES`` algorithm. Follow the
-:ref:`migration procedure <fips_password_migration>` to re-encrypt it before enabling OS-level FIPS.
+If GeoServer fails to start with ``Failed to decrypt master password with [PBEWITHSHA256AND256BITAES-BC,
+PBEWithHmacSHA256AndAES_128, PBEWithMD5AndDES]`` on a FIPS-enabled operating system, the master password
+file is still encrypted with the legacy ``PBEWithMD5AndDES`` algorithm, which the OS blocks. Follow the
+:ref:`migration procedure <fips_password_migration>`: a single start on a host without OS-level FIPS
+re-encrypts the file. On a non-FIPS host the same error means the file is corrupt or was written by a
+different GeoServer; restore ``passwd.backup`` or delete the ``security`` directory to start fresh.
+
+A warning ``Failed to migrate master password to PBEWITHSHA256AND256BITAES-BC`` means the file was read but
+could not be rewritten (for example a read-only ``security`` directory). GeoServer keeps running with the old
+file; fix the permissions so the migration can complete on the next start.
 
 **Provider not found errors**
 

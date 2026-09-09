@@ -179,26 +179,20 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
         if (requested == null || requested.isEmpty()) return;
         Provider existing = Security.getProvider(requested);
         if (existing != null) return;
-        try {
-            if ("BCFIPS".equals(requested)) {
-                Class<?> providerClass = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
-                Security.addProvider(
-                        (Provider) providerClass.getDeclaredConstructor().newInstance());
-            }
-            // Note: Regular BC provider is not shipped with GeoServer; only BC-FIPS is available
-        } catch (ReflectiveOperationException | SecurityException e) {
-            // In FIPS mode this is a real problem — the algorithm will likely fail downstream.
-            // In non-FIPS mode it's acceptable to fall back to default providers.
-            if (KeyStoreProviderImpl.isFipsMode()) {
-                LOGGER.log(
-                        Level.WARNING,
-                        "Failed to register requested security provider '" + requested
-                                + "' in FIPS mode. Encryption operations may fail: " + e.getMessage());
-            } else {
-                LOGGER.log(
-                        Level.FINE,
-                        "Provider '" + requested + "' not available, falling back to default JCA providers");
-            }
+        // Note: Regular BC provider is not shipped with GeoServer; only BC-FIPS is available
+        if (KeyStoreProviderImpl.BCFIPS_PROVIDER.equals(requested)
+                && KeyStoreProviderImpl.ensureBcFipsProviderRegistered()) {
+            return;
+        }
+        // In FIPS mode this is a real problem — the algorithm will likely fail downstream.
+        // In non-FIPS mode it's acceptable to fall back to default providers.
+        if (KeyStoreProviderImpl.isFipsMode()) {
+            LOGGER.log(
+                    Level.WARNING,
+                    "Failed to register requested security provider '" + requested
+                            + "' in FIPS mode. Encryption operations may fail.");
+        } else {
+            LOGGER.log(Level.FINE, "Provider '" + requested + "' not available, falling back to default JCA providers");
         }
     }
 

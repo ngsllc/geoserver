@@ -59,8 +59,35 @@ GeoServer includes BC-FIPS libraries by default. No special profiles are needed.
   2. System property ``FIPS_MODE``
   3. Environment variable ``FIPS_MODE``
 
-* ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` loads FIPS provider when needed
+* ``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` registers the BCFIPS provider on demand; it is the
+  single registration point used by the keystore provider, ``GeoServerPBEPasswordEncoder``,
+  ``URLMasterPasswordProvider`` and ``GeoserverWicketEncrypterFactory``
 * Automatic keystore type selection: BCFKS (FIPS) or JCEKS (non-FIPS)
+
+Password-Based Encryption Algorithms
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+All strong password-based encryption uses one algorithm, ``KeyStoreProviderImpl.FIPS_PBE_ALGORITHM``
+(``PBEWITHSHA256AND256BITAES-BC``: PKCS#12 key derivation with SHA-256, AES-256/CBC). BC-FIPS registers this
+name; the stock BouncyCastle name ``PBEWITHSHA256AND256BITAES-CBC-BC`` and the SunJCE PBES2 names do **not**
+exist in BC-FIPS, so never hardcode an algorithm string. Reference the constant and call
+``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` before building a Jasypt encryptor for it, then pin
+the encryptor with ``setProviderName(KeyStoreProviderImpl.BCFIPS_PROVIDER)`` so the lookup does not depend on
+provider ordering. The constant is consumed by:
+
+* ``applicationSecurityContext.xml`` as the default of the ``strongPbePasswordEncoder`` bean (overridable with
+  the ``geoserver.encryption.algorithm`` and ``geoserver.encryption.provider`` system properties)
+* ``URLMasterPasswordProvider`` for the encrypted master password file
+* ``GeoserverWicketEncrypterFactory`` for URL parameter encryption
+
+``URLMasterPasswordProvider.decode()`` tries the algorithms in ``KNOWN_PBE_ALGORITHMS`` in order: the current
+algorithm, ``PBEWithHmacSHA256AndAES_128`` (used by earlier FIPS builds) and the legacy ``PBEWithMD5AndDES``.
+A file readable only with one of the fallbacks is re-encrypted with the current algorithm through a temp
+file, a ``.backup`` copy and an atomic rename. The fallbacks are attempted in FIPS mode too, so that the
+documented migration (one start with ``FIPS_MODE=true`` on a host without OS-level FIPS) can read legacy
+files; on an OS with FIPS enforced the JVM rejects MD5/DES and the decode fails with a message pointing at the
+migration procedure. When adding a new algorithm, append the previous one to ``KNOWN_PBE_ALGORITHMS`` and add
+a ciphertext fixture to ``JasyptDecodeTest`` so existing data directories stay readable.
 
 Core Implementation
 ^^^^^^^^^^^^^^^^^^^
@@ -86,13 +113,20 @@ When ``FIPS_MODE=true``:
 
 When ``FIPS_MODE=false`` or unset:
 * Keystore Type: JCEKS (automatic)
-* Provider: SunJCE (default)
+* Provider: SunJCE (default) for the keystore; BCFIPS is still registered on demand for password-based
+  encryption
 
 Testing FIPS behavior
 ~~~~~~~~~~~~~~~~~~~~~
 
-Unit tests cover default type selection and provider resolution. For manual checks, set
-``FIPS_MODE=true`` (or ``-DFIPS_MODE=true``) and verify BCFKS keystore usage in logs.
+Unit tests cover default type selection and provider resolution. ``JasyptDecodeTest`` (``gs-main``) checks
+the algorithm round trips, decodes fixtures written with the legacy and previous algorithms and runs the
+decode chain with ``FIPS_MODE=true``; ``URLMasterPasswordProviderTest`` (``security-tests``) verifies that
+legacy and previous-algorithm master password files are migrated with a backup and no leftover temp files.
+Note that the system test harness cannot boot with ``FIPS_MODE=true`` set for the whole JVM, so FIPS-mode
+behaviour is covered by unit tests and by ``FipsModeSwitchingIntegrationTest``, which toggles the property
+per test. For manual checks, set ``FIPS_MODE=true`` (or ``-DFIPS_MODE=true``) and verify BCFKS keystore usage
+in the logs.
 
 Integration with Security Framework
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

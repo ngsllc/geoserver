@@ -50,7 +50,7 @@ Password-based encryption
 GeoServer supports two forms of PBE. **Weak PBE** (the GeoServer default) uses a basic encryption method that is relatively easy to crack. The encryption key is derived from the password using `MD5 <http://en.wikipedia.org/wiki/Message_Digest_Algorithm_5>`_ 1000 times iteratively. The encryption algorithm itself is `DES <http://en.wikipedia.org/wiki/Data_Encryption_Standard>`_ (Data Encryption Standard). DES has an effective key length of 56 bits, which is not really a challenge for computer systems in these days.
 
 
-**Strong PBE** uses a much stronger encryption method based on an `AES <http://en.wikipedia.org/wiki/Advanced_Encryption_Standard>`_ 256-bit algorithm with `CBC <http://en.wikipedia.org/wiki/Block_cipher_modes_of_operation>`_. The key length is 256 bit and is derived using `SHA-256 <http://en.wikipedia.org/wiki/SHA-2>`_ instead of MD5. Using Strong PBE is highly recommended.
+**Strong PBE** uses a much stronger encryption method based on an `AES <http://en.wikipedia.org/wiki/Advanced_Encryption_Standard>`_ 256-bit algorithm with `CBC <http://en.wikipedia.org/wiki/Block_cipher_modes_of_operation>`_. The key length is 256 bit and is derived using `SHA-256 <http://en.wikipedia.org/wiki/SHA-2>`_ instead of MD5. The algorithm (``PBEWITHSHA256AND256BITAES-BC``) is provided by the BouncyCastle FIPS provider, which GeoServer registers automatically. Using Strong PBE is highly recommended, and it is mandatory in :ref:`FIPS mode <security_fips>`.
 
 As an example, the password ``geoserver`` is encrypted to ``crypt1:KWhO7jrTz/Gi0oTQRKsVeCmWIZY5VZaD``.
 ``crypt1`` indicates the usage of Weak PBE. The prefix for Strong PBE is ``crypt2``. The ciphertext and the salt are base 64 encoded.
