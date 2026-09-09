@@ -252,16 +252,28 @@ cannot be read once MD5 and DES are blocked.
 +-------------------------------+----------------+---------------------------------------------------+
 | Artifact                      | Auto-migrated? | Details                                           |
 +===============================+================+===================================================+
-| Keystore (JCEKS → BCFKS)      | Yes            | Backup created, keys copied, old file removed     |
+| Keystore (JCEKS → BCFKS)      | Yes            | Backup created, keys copied unchanged (legacy     |
+|                               |                | keys are stored as ``HmacSHA256`` entries), old   |
+|                               |                | file removed                                      |
 +-------------------------------+----------------+---------------------------------------------------+
 | Master password file          | Yes            | Re-encrypted from ``PBEWithMD5AndDES`` (or        |
 |                               |                | ``PBEWithHmacSHA256AndAES_128``, used by earlier  |
 |                               |                | FIPS builds) to ``PBEWITHSHA256AND256BITAES-BC``; |
 |                               |                | backup kept, atomic write                         |
 +-------------------------------+----------------+---------------------------------------------------+
-| ``crypt1:`` user/data-store   | **No**         | Must be re-entered via the web UI or REST API     |
-| passwords                     |                | after migration                                   |
+| Configuration password        | Yes            | Switched to ``strongPbePasswordEncoder`` if the   |
+| encoder                       |                | weak encoder is configured (FIPS mode only)       |
 +-------------------------------+----------------+---------------------------------------------------+
+| ``crypt2:`` passwords         | Not needed     | Values written by earlier GeoServer versions      |
+|                               |                | stay readable; new values use the same format     |
++-------------------------------+----------------+---------------------------------------------------+
+| ``crypt1:`` user/data-store   | **No**         | Readable in non-FIPS mode only. Must be           |
+| passwords                     |                | re-entered via the web UI or REST API             |
++-------------------------------+----------------+---------------------------------------------------+
+
+Passwords are encrypted with a key kept in the keystore. Keys created by earlier GeoServer versions and keys created
+with FIPS support use a slightly different on-disk format; GeoServer tells them apart by the key itself, so a data
+directory keeps one consistent format per key and nothing has to be re-encrypted when upgrading.
 
 Migration Steps (Recommended)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -287,12 +299,15 @@ Migration Steps (Recommended)
    On startup GeoServer will:
 
    * Register the BouncyCastle FIPS provider (BCFIPS)
-   * Detect the legacy JCEKS keystore and migrate it to BCFKS format
+   * Switch the configuration password encoder to ``strongPbePasswordEncoder`` if the weak
+     ``pbePasswordEncoder`` is configured, logging a warning
+   * Detect the legacy JCEKS keystore and migrate it to BCFKS format, preserving the keys
    * Detect the legacy master-password encryption and re-encrypt with
      ``PBEWITHSHA256AND256BITAES-BC``, keeping a ``.backup`` copy of the original file
    * Log each migration step at INFO level
 
-3. **Re-enter any** ``crypt1:`` **passwords** through the GeoServer web admin:
+3. **Re-enter any** ``crypt1:`` **passwords** through the GeoServer web admin. Passwords already
+   stored as ``crypt2:`` need no action:
 
    * Data store connection passwords
    * OGC service credentials
@@ -314,6 +329,7 @@ Migration Steps (Recommended)
 
    .. code-block:: text
 
+      WARN  ... FIPS mode: the configuration password encoder 'pbePasswordEncoder' uses an algorithm that is not available in FIPS mode, switching to 'strongPbePasswordEncoder'
       INFO  ... Master password was encrypted with PBEWithMD5AndDES, migrating to PBEWITHSHA256AND256BITAES-BC
       INFO  ... Successfully migrated master password to PBEWITHSHA256AND256BITAES-BC
       INFO  ... Keystore migration completed: JCEKS -> BCFKS
@@ -348,7 +364,8 @@ Migration Steps (Recommended)
 Manual Migration (Alternative)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-If you prefer manual control, you can update the security configuration directly:
+In FIPS mode the switch to the strong encoder happens automatically at startup. If you prefer to do it
+before enabling FIPS mode, or on a non-FIPS host, you can update the security configuration directly:
 
 1. Edit ``<data-dir>/security/config.xml`` and change:
 
@@ -372,6 +389,10 @@ If you prefer manual control, you can update the security configuration directly
 * Attempting to use the weak password encoder in FIPS mode will result in a startup error
 * The ``bc-fips`` and ``bcpkix-fips`` JARs **must** be on the classpath for FIPS mode to work
 * There is no automatic migration of ``crypt1:`` passwords — they must be re-entered
+* Data directories migrated by a FIPS build older than this one may hold a BCFKS keystore whose keys were
+  stored as AES entries of the wrong size and cannot be read (``Provided key data wrong size for AES``).
+  Restore the keystore from ``security/geoserver.jceks.backup`` (rename it to ``geoserver.jceks`` and
+  delete ``geoserver.bcfks``), then restart: the migration runs again and keeps the keys readable
 * The master password file is also migrated when GeoServer runs **without** ``FIPS_MODE``: the
   BouncyCastle FIPS provider is registered on demand for the master password in both modes, so a
   data directory can be prepared on a regular host and then moved to a FIPS host
