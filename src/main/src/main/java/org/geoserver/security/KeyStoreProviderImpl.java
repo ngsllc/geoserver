@@ -243,8 +243,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     }
 
     /**
-     * Probe whether an ASN.1-format keystore is BCFKS or PKCS12 by attempting to load it. Falls
-     * back to filename-based detection if neither loads successfully.
+     * Probe whether an ASN.1-format keystore is BCFKS or PKCS12 by attempting to load it. Falls back to filename-based
+     * detection if neither loads successfully.
      */
     private String probeBcfksOrPkcs12(Resource resource) {
         // Try BCFKS first (more specific to this codebase)
@@ -369,11 +369,11 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                             targetAlgorithm = DEFAULT_SECRET_KEY_ALGORITHM; // Use AES
                         }
                         key = new SecretKeySpec(encoded, targetAlgorithm);
-                        LOGGER.log(Level.FINE, "Normalized key '" + alias + "' to SecretKeySpec with algorithm " + targetAlgorithm);
-                    } else {
                         LOGGER.log(
-                                Level.SEVERE,
-                                "Cannot normalize key '" + alias + "' - getEncoded() returned null.");
+                                Level.FINE,
+                                "Normalized key '" + alias + "' to SecretKeySpec with algorithm " + targetAlgorithm);
+                    } else {
+                        LOGGER.log(Level.SEVERE, "Cannot normalize key '" + alias + "' - getEncoded() returned null.");
                         throw new Exception("Cannot migrate key '" + alias + "' - key encoding is not available");
                     }
                 }
@@ -457,7 +457,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                     // 1. Prefer the file matching the current active mode
                     if (BCFKS_KEYSTORE_TYPE.equals(cachedKeyStoreType) && legacyBcfks.getType() != Type.UNDEFINED) {
                         candidate = legacyBcfks;
-                    } else if (JCEKS_KEYSTORE_TYPE.equals(cachedKeyStoreType) && legacyJceks.getType() != Type.UNDEFINED) {
+                    } else if (JCEKS_KEYSTORE_TYPE.equals(cachedKeyStoreType)
+                            && legacyJceks.getType() != Type.UNDEFINED) {
                         candidate = legacyJceks;
                     }
 
@@ -740,9 +741,10 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                         oldResource.delete();
                         LOGGER.log(Level.INFO, "Deleted old keystore: " + oldResource.name());
                     } catch (Exception delEx) {
-                        LOGGER.log(Level.WARNING,
-                                "Could not delete old keystore " + oldResource.name()
-                                        + " after migration (non-fatal): " + delEx.getMessage());
+                        LOGGER.log(
+                                Level.WARNING,
+                                "Could not delete old keystore " + oldResource.name() + " after migration (non-fatal): "
+                                        + delEx.getMessage());
                     }
                 }
 
@@ -908,8 +910,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                             + "If FIPS mode was recently changed, a keystore migration may be required. "
                             + "Error: " + e.getMessage(),
                     e);
-            throw new IOException(
-                    "Keystore initialization failed — existing keystore preserved to avoid data loss", e);
+            throw new IOException("Keystore initialization failed — existing keystore preserved to avoid data loss", e);
         }
     }
 
