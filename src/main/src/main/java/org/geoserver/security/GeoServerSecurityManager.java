@@ -391,6 +391,10 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
 
         // migrate from old security config
         try {
+            if (KeyStoreProviderImpl.isFipsMode()) {
+                ensureFipsCompatibleConfigPasswordEncoder();
+            }
+
             Version securityVersion = getSecurityVersion();
 
             boolean migratedFrom21 = false;
@@ -432,6 +436,38 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             }
         } catch (Exception e) {
             throw new BeanCreationException("Error occured reading security configuration", e);
+        }
+    }
+
+    /**
+     * In FIPS mode the weak configuration password encoder (MD5/DES) cannot be used at all, so a data directory that
+     * still names it would fail as soon as the configuration is validated or a password is read. Switch it to the
+     * strong encoder before anything loads it. Existing values written by the weak encoder ({@code crypt1:}) cannot be
+     * re-encrypted because the algorithm is unavailable; they have to be re-entered, see the FIPS documentation.
+     */
+    void ensureFipsCompatibleConfigPasswordEncoder() throws Exception {
+        Resource configFile = security().get(CONFIG_FILENAME);
+        if (configFile.getType() != Type.RESOURCE) {
+            return; // fresh data directory, the defaults already select the strong encoder in FIPS mode
+        }
+        SecurityManagerConfig config = loadSecurityConfig();
+        String name = config.getConfigPasswordEncrypterName();
+        if (name == null) {
+            return;
+        }
+        Object encoder = GeoServerExtensions.bean(name);
+        if (encoder instanceof GeoServerPBEPasswordEncoder pbe && !pbe.isAvailableInFipsMode()) {
+            GeoServerPBEPasswordEncoder strong = loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, true);
+            if (strong == null) {
+                throw new IOException("FIPS mode is enabled but no FIPS compatible configuration password encoder is "
+                        + "available to replace '" + name + "'");
+            }
+            LOGGER.warning("FIPS mode: the configuration password encoder '" + name
+                    + "' uses an algorithm that is not available in FIPS mode, switching to '" + strong.getName()
+                    + "'. Passwords already stored with the '" + pbe.getPrefix()
+                    + ":' prefix cannot be decrypted in FIPS mode and must be re-entered.");
+            config.setConfigPasswordEncrypterName(strong.getName());
+            xStreamPersist(configFile, config, globalPersister());
         }
     }
 
@@ -915,7 +951,8 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             try {
                 encoder.initialize(this);
             } catch (IOException e) {
-                throw new RuntimeException("Error occurred initializing password encoder");
+                throw new RuntimeException(
+                        "Error occurred initializing password encoder " + name + ": " + e.getMessage(), e);
             }
         }
         return encoder;

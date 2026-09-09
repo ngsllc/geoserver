@@ -80,6 +80,23 @@ provider ordering. The constant is consumed by:
 * ``URLMasterPasswordProvider`` for the encrypted master password file
 * ``GeoserverWicketEncrypterFactory`` for URL parameter encryption
 
+**Keystore keys and stored passwords.** Two generations of keystore keys exist. Keys created before FIPS
+support are the raw bytes of a 40 character random password stored as a ``PBE`` key; keys created with FIPS
+support are 256 bit AES keys derived with SHA-256 (``KeyStoreProviderImpl.deriveAesKey``). BCFKS rejects the
+``PBE`` label and enforces AES key sizes, so ``KeyStoreProviderImpl.toBcfksSecretKey`` relabels legacy keys as
+``HmacSHA256`` entries (``LEGACY_SECRET_KEY_ALGORITHM``) when a keystore is migrated or its master password is
+changed; the bytes are never altered. ``GeoServerPBEPasswordEncoder.isLegacyKey`` uses the label to pick the
+matching Jasypt setup (``KeyMaterial``): legacy keys use the key characters as password and the PKCS#12 derived
+IV, exactly like upstream GeoServer with stock BouncyCastle, so ``crypt1:``/``crypt2:`` values written by
+earlier versions decrypt unchanged; AES keys use the Base64 form of the key and an explicit random IV. The
+format is a property of the key, never of the individual value. ``LegacyPasswordCompatibilityTest`` and
+``FipsBootMigrationTest`` pin this behaviour with values encrypted by upstream 2.28 under the test keystore
+key (``LegacyPasswordFixtures``).
+
+In FIPS mode ``GeoServerSecurityManager.ensureFipsCompatibleConfigPasswordEncoder`` runs before the security
+directory migrations and switches a configuration password encoder that reports
+``isAvailableInFipsMode() == false`` to the strong encoder, persisting ``config.xml``.
+
 ``URLMasterPasswordProvider.decode()`` tries the algorithms in ``KNOWN_PBE_ALGORITHMS`` in order: the current
 algorithm, ``PBEWithHmacSHA256AndAES_128`` (used by earlier FIPS builds) and the legacy ``PBEWithMD5AndDES``.
 A file readable only with one of the fallbacks is re-encrypted with the current algorithm through a temp
