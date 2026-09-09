@@ -33,7 +33,7 @@ public class SecurityConfigException extends AbstractSecurityException {
     // return MessageFormat.format("Install unrestricted security policy files before using a strong
     // configuration password encoder",args);
 
-    public static final String INVALID_STRONG_PASSWORD_ENCODER = "INVALID_CONFIG_PASSWORD_ENCODER";
+    public static final String INVALID_STRONG_PASSWORD_ENCODER = "INVALID_STRONG_PASSWORD_ENCODER";
     // return MessageFormat.format("Install unrestricted security policy files before using a strong
     // user password encoder",args);
 
