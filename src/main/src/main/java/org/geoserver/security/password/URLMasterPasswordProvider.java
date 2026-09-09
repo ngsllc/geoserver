@@ -91,7 +91,7 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
     }
 
     /** FIPS-compatible algorithm for PBE encryption */
-    static final String FIPS_PBE_ALGORITHM = "PBEWithHmacSHA256AndAES_128";
+    static final String FIPS_PBE_ALGORITHM = "PBEWITHSHA256AND256BITAES-CBC-BC";
 
     /** Legacy algorithm (not FIPS-compliant) */
     static final String LEGACY_PBE_ALGORITHM = "PBEWithMD5AndDES";
