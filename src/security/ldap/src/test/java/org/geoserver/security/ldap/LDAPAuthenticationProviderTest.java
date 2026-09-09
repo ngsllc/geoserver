@@ -56,9 +56,8 @@ public class LDAPAuthenticationProviderTest extends LDAPBaseTest {
         }
 
         /**
-         * Test that group search works without bindBeforeGroupSearch when anonymous access is
-         * allowed. UnboundID In-Memory LDAP server allows anonymous access by default, so this
-         * verifies the no-bind path succeeds.
+         * Test that group search works without bindBeforeGroupSearch when anonymous access is allowed. UnboundID
+         * In-Memory LDAP server allows anonymous access by default, so this verifies the no-bind path succeeds.
          */
         @Test
         public void testGroupSearchWorksWithoutBindWhenAnonymousAllowed() throws Exception {

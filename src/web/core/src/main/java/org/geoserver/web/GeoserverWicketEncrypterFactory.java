@@ -114,15 +114,13 @@ public class GeoserverWicketEncrypterFactory implements ICryptFactory {
             if (org.geoserver.security.KeyStoreProviderImpl.isFipsMode()) {
                 // On a FIPS host the only safe option is NoCrypt — MD5/DES are blocked
                 manager.disposePassword(key);
-                LOGGER.severe(
-                        "PBEWithHmacSHA256AndAES_128 not available and FIPS mode is active; "
-                                + "URL parameter encryption disabled: " + e.getMessage());
+                LOGGER.severe("PBEWithHmacSHA256AndAES_128 not available and FIPS mode is active; "
+                        + "URL parameter encryption disabled: " + e.getMessage());
                 s.setAttribute(ICRYPT_ATTR_NAME, NoCrypt);
                 return NoCrypt;
             }
-            LOGGER.warning(
-                    "PBEWithHmacSHA256AndAES_128 not available for URL parameter encryption, "
-                            + "falling back to PBEWITHMD5ANDDES: " + e.getMessage());
+            LOGGER.warning("PBEWithHmacSHA256AndAES_128 not available for URL parameter encryption, "
+                    + "falling back to PBEWITHMD5ANDDES: " + e.getMessage());
             enc = new StandardPBEByteEncryptor();
             enc.setPasswordCharArray(key);
             enc.setSaltGenerator(new org.geoserver.security.password.FipsRandomSaltGenerator());
