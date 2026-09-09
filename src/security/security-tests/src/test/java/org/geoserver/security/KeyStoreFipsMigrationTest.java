@@ -34,11 +34,13 @@ public class KeyStoreFipsMigrationTest extends GeoServerSystemTestSupport {
     private static final String TEST_KEY_VALUE = "test-secret-value";
 
     private String originalFipsMode;
+    private boolean bcFipsProviderPreRegistered;
 
     @Before
     public void saveOriginalFipsMode() {
         originalFipsMode = System.getProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
         LOGGER.log(Level.FINE, "Saved original FIPS mode: " + originalFipsMode);
+        bcFipsProviderPreRegistered = java.security.Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null;
         // Clear the static cache in SystemTestData to ensure tests see the correct keystore type
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
     }
@@ -54,6 +56,11 @@ public class KeyStoreFipsMigrationTest extends GeoServerSystemTestSupport {
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
         // Force reload to ensure clean state for next test
         getSecurityManager().getKeyStoreProvider().reloadKeyStore();
+        // Undo any BC-FIPS provider registration triggered by this test, so it doesn't leak into
+        // other test classes sharing this JVM
+        if (!bcFipsProviderPreRegistered) {
+            java.security.Security.removeProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER);
+        }
         LOGGER.log(Level.FINE, "Restored original FIPS mode: " + originalFipsMode);
     }
 
