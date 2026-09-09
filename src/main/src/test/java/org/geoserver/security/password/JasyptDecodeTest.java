@@ -5,20 +5,19 @@
 package org.geoserver.security.password;
 
 import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
-import static org.junit.Assert.fail;
 
 import java.nio.charset.StandardCharsets;
-import java.security.Security;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
 import org.geoserver.security.KeyStoreProviderImpl;
 import org.geotools.util.logging.Logging;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
-import org.junit.After;
-import org.junit.Before;
+import org.jasypt.exceptions.EncryptionOperationNotPossibleException;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 /** Test to verify Jasypt decryption behavior with different algorithm configurations. */
@@ -29,46 +28,70 @@ public class JasyptDecodeTest {
     private static final String PASSWORD = "testpassword";
     private static final byte[] KEY = "geoserver".getBytes(StandardCharsets.UTF_8);
 
-    private boolean bcFipsProviderPreRegistered;
-
-    @Before
-    public void registerBcFipsProvider() throws Exception {
-        // The FIPS algorithm below is only implemented by BC-FIPS; production code registers the
-        // provider lazily via KeyStoreProviderImpl, which this standalone test never triggers.
-        bcFipsProviderPreRegistered = Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null;
-        if (!bcFipsProviderPreRegistered) {
-            Security.addProvider(
-                    (java.security.Provider) Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider")
-                            .getDeclaredConstructor()
-                            .newInstance());
-        }
-    }
-
-    @After
-    public void deregisterBcFipsProvider() {
-        // Don't leak the provider into other test classes sharing this JVM
-        if (!bcFipsProviderPreRegistered) {
-            Security.removeProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER);
-        }
+    @BeforeClass
+    public static void registerBcFips() {
+        // The FIPS algorithm is provided by BCFIPS only, exactly like production code this test must register it
+        assertTrue("bc-fips must be on the test classpath", KeyStoreProviderImpl.ensureBcFipsProviderRegistered());
     }
 
     /**
-     * Verify that the bundled master password file can be decoded with Jasypt defaults (PBEWithMD5AndDES). If the file
-     * format or key changes, this test must be updated.
+     * Master password file content ("geoserver") as written by GeoServer before FIPS support was added, that is
+     * encrypted with the Jasypt default PBEWithMD5AndDES and the provider's internal key.
+     */
+    private static final String LEGACY_FIXTURE = "GsqggqcCoGxI+pEyUx41NzY03DvYwBbt";
+
+    /** Same content as written by earlier FIPS builds, which used PBEWithHmacSHA256AndAES_128 (SunJCE). */
+    private static final String PREVIOUS_FIPS_FIXTURE =
+            "hWh7fueafM+AaprqKysMzWizbp/GOjmatHJ4kO/7wQCB/LV0W7Fwa+LDhp9531MS";
+
+    /** Existing master password files must remain readable; if the key or permutation changes these fail on purpose. */
+    @Test
+    public void testDecodeLegacyFixture() throws Exception {
+        assertEquals("geoserver", decodeFixture(LEGACY_FIXTURE, URLMasterPasswordProvider.LEGACY_PBE_ALGORITHM));
+    }
+
+    @Test
+    public void testDecodePreviousFipsFixture() throws Exception {
+        assertEquals(
+                "geoserver",
+                decodeFixture(PREVIOUS_FIPS_FIXTURE, URLMasterPasswordProvider.PREVIOUS_FIPS_PBE_ALGORITHM));
+    }
+
+    /**
+     * In FIPS mode (as set by FIPS_MODE=true on a host without OS level FIPS, the documented migration setup) the
+     * provider must still read files written with the previous and legacy algorithms so it can migrate them.
      */
     @Test
-    public void testDecodeActualTestData() throws Exception {
-        // This is the actual password from src/web/app/src/main/webapp/data/security/masterpw/default/passwd
-        String testDataPassword = "PNscY3AJUiCvPltKjaZ+KAg9bDHm1CNxfxIEUl0caSx/1hfOAXSeMyV7yD9cu0FM";
+    public void testDecodeChainInFipsMode() throws Exception {
+        URLMasterPasswordProviderConfig config = new URLMasterPasswordProviderConfig();
+        config.setName("test");
+        config.setEncrypting(true);
+        URLMasterPasswordProvider provider = new URLMasterPasswordProvider();
+        provider.initializeFromConfig(config);
 
-        // Try with Jasypt default (no algorithm set = PBEWithMD5AndDES)
-        StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
-        decryptor.setPassword(new String(KEY));
-        byte[] decrypted = decryptor.decrypt(Base64.decodeBase64(testDataPassword));
-        // The decrypted value should be a non-empty UTF-8 string
-        String decoded = new String(decrypted, StandardCharsets.UTF_8);
-        assertNotNull("Decoded value should not be null", decoded);
-        assertTrue("Decoded value should not be empty", decoded.length() > 0);
+        String oldValue = System.getProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
+        System.setProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR, "true");
+        try {
+            assertTrue(KeyStoreProviderImpl.isFipsMode());
+            byte[] utf8 = "geoserver".getBytes(StandardCharsets.UTF_8);
+            // current algorithm round trip
+            assertArrayEquals(utf8, provider.decode(provider.encode("geoserver".toCharArray())));
+            // files from earlier builds are still readable (migration itself is skipped, no security manager here)
+            assertArrayEquals(utf8, provider.decode(LEGACY_FIXTURE.getBytes(StandardCharsets.US_ASCII)));
+            assertArrayEquals(utf8, provider.decode(PREVIOUS_FIPS_FIXTURE.getBytes(StandardCharsets.US_ASCII)));
+        } finally {
+            if (oldValue == null) {
+                System.clearProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
+            } else {
+                System.setProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR, oldValue);
+            }
+        }
+    }
+
+    private static String decodeFixture(String fixture, String algorithm) {
+        StandardPBEByteEncryptor decryptor = URLMasterPasswordProvider.newEncryptor(algorithm);
+        decryptor.setPasswordCharArray(new URLMasterPasswordProvider().key());
+        return new String(decryptor.decrypt(Base64.decodeBase64(fixture)), StandardCharsets.UTF_8);
     }
 
     @Test
@@ -89,24 +112,40 @@ public class JasyptDecodeTest {
 
     @Test
     public void testFipsEncodeDecode() throws Exception {
-        // Encode with FIPS algorithm
-        StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
-        encryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
-        encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
-        encryptor.setIvGenerator(new FipsRandomIvGenerator());
+        // Encode with FIPS algorithm, using the exact same encryptor setup as URLMasterPasswordProvider
+        StandardPBEByteEncryptor encryptor =
+                URLMasterPasswordProvider.newEncryptor(URLMasterPasswordProvider.FIPS_PBE_ALGORITHM);
         encryptor.setPassword(new String(KEY));
         byte[] encrypted = encryptor.encrypt(PASSWORD.getBytes(StandardCharsets.UTF_8));
         String encoded = Base64.encodeBase64String(encrypted);
         LOGGER.log(Level.FINE, "Encoded with FIPS: " + encoded);
 
-        // Decode with FIPS algorithm - also needs salt/IV generators set
-        StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
-        decryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
-        decryptor.setSaltGenerator(new FipsRandomSaltGenerator());
-        decryptor.setIvGenerator(new FipsRandomIvGenerator());
+        // Decode with FIPS algorithm
+        StandardPBEByteEncryptor decryptor =
+                URLMasterPasswordProvider.newEncryptor(URLMasterPasswordProvider.FIPS_PBE_ALGORITHM);
         decryptor.setPassword(new String(KEY));
         byte[] decrypted = decryptor.decrypt(Base64.decodeBase64(encoded));
         assertArrayEquals(PASSWORD.getBytes(StandardCharsets.UTF_8), decrypted);
+    }
+
+    @Test
+    public void testPreviousFipsAlgorithmRoundTrip() throws Exception {
+        // The algorithm used by earlier FIPS builds is provided by SunJCE and must keep working for migration
+        StandardPBEByteEncryptor encryptor =
+                URLMasterPasswordProvider.newEncryptor(URLMasterPasswordProvider.PREVIOUS_FIPS_PBE_ALGORITHM);
+        encryptor.setPassword(new String(KEY));
+        byte[] encrypted = encryptor.encrypt(PASSWORD.getBytes(StandardCharsets.UTF_8));
+
+        StandardPBEByteEncryptor decryptor =
+                URLMasterPasswordProvider.newEncryptor(URLMasterPasswordProvider.PREVIOUS_FIPS_PBE_ALGORITHM);
+        decryptor.setPassword(new String(KEY));
+        assertArrayEquals(PASSWORD.getBytes(StandardCharsets.UTF_8), decryptor.decrypt(encrypted));
+
+        // and its ciphertext must be rejected by the current algorithm, otherwise the fallback chain is unsafe
+        StandardPBEByteEncryptor current =
+                URLMasterPasswordProvider.newEncryptor(URLMasterPasswordProvider.FIPS_PBE_ALGORITHM);
+        current.setPassword(new String(KEY));
+        assertThrows(EncryptionOperationNotPossibleException.class, () -> current.decrypt(encrypted));
     }
 
     @Test
@@ -118,16 +157,13 @@ public class JasyptDecodeTest {
         String encoded = Base64.encodeBase64String(encrypted);
         LOGGER.log(Level.FINE, "Legacy encoded: " + encoded);
 
-        // Try to decode with FIPS algorithm first (should fail)
-        try {
-            StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
-            decryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
-            decryptor.setPassword(new String(KEY));
-            decryptor.decrypt(Base64.decodeBase64(encoded));
-            fail("Should have failed to decode with FIPS algorithm");
-        } catch (Exception e) {
-            LOGGER.log(Level.FINE, "Expected failure with FIPS: " + e.getClass().getSimpleName());
-        }
+        // Decoding with the FIPS algorithm must fail at decryption time (the algorithm itself is available)
+        StandardPBEByteEncryptor fipsDecryptor =
+                URLMasterPasswordProvider.newEncryptor(URLMasterPasswordProvider.FIPS_PBE_ALGORITHM);
+        fipsDecryptor.setPassword(new String(KEY));
+        assertThrows(
+                EncryptionOperationNotPossibleException.class,
+                () -> fipsDecryptor.decrypt(Base64.decodeBase64(encoded)));
 
         // Decode with default (no algorithm set) - should work
         StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();

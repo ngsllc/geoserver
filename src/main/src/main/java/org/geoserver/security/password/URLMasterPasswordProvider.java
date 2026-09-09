@@ -20,8 +20,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
-import java.security.Provider;
-import java.security.Security;
+import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
@@ -93,28 +92,48 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
         return getSecurityManager().masterPasswordProvider().get(getName());
     }
 
-    /** FIPS-compatible algorithm for PBE encryption */
-    static final String FIPS_PBE_ALGORITHM = "PBEWITHSHA256AND256BITAES-BC";
+    /**
+     * Algorithm used to encrypt the master password file. Provided by the BouncyCastle FIPS provider only, so every
+     * encryptor built for it registers the provider first, see {@link KeyStoreProviderImpl#FIPS_PBE_ALGORITHM}.
+     */
+    static final String FIPS_PBE_ALGORITHM = KeyStoreProviderImpl.FIPS_PBE_ALGORITHM;
 
-    /** Legacy algorithm (not FIPS-compliant) */
+    /**
+     * FIPS-compatible algorithm used by earlier FIPS builds (PBES2 with HMAC-SHA256 and AES-128, provided by SunJCE).
+     * Kept so master password files written by those builds can still be read; they are re-encrypted with
+     * {@link #FIPS_PBE_ALGORITHM} on first use.
+     */
+    static final String PREVIOUS_FIPS_PBE_ALGORITHM = "PBEWithHmacSHA256AndAES_128";
+
+    /** Legacy algorithm (not FIPS-compliant), the Jasypt default used before FIPS support was added */
     static final String LEGACY_PBE_ALGORITHM = "PBEWithMD5AndDES";
 
     /**
-     * Ensures the BC-FIPS provider is registered before using {@link #FIPS_PBE_ALGORITHM}, which BC-FIPS is the only
-     * provider to implement. Unlike {@link KeyStoreProviderImpl}, master password encryption always uses this algorithm
-     * regardless of whether overall FIPS mode is enabled, so registration can't be left to FIPS-mode-only code paths.
+     * Algorithms that may have been used to write an existing master password file, in the order in which they are
+     * tried when reading. Anything decoded with an algorithm other than {@link #FIPS_PBE_ALGORITHM} is migrated.
      */
-    private static void ensureBcFipsProviderAvailable() {
-        if (Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null) return;
-        try {
-            Class<?> providerClass = Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
-            Security.addProvider(
-                    (Provider) providerClass.getDeclaredConstructor().newInstance());
-        } catch (ReflectiveOperationException | SecurityException e) {
-            LOGGER.log(
-                    Level.WARNING,
-                    "Failed to register BC-FIPS provider; master password encryption may fail: " + e.getMessage());
+    static final List<String> KNOWN_PBE_ALGORITHMS =
+            List.of(FIPS_PBE_ALGORITHM, PREVIOUS_FIPS_PBE_ALGORITHM, LEGACY_PBE_ALGORITHM);
+
+    /**
+     * Builds a Jasypt encryptor for one of the {@link #KNOWN_PBE_ALGORITHMS}. The current FIPS algorithm is pinned to
+     * the BCFIPS provider, which is registered on demand so that this works regardless of whether a keystore or
+     * password encoder has been initialized first, in both FIPS and non-FIPS mode.
+     */
+    static StandardPBEByteEncryptor newEncryptor(String algorithm) {
+        StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
+        encryptor.setAlgorithm(algorithm);
+        if (FIPS_PBE_ALGORITHM.equals(algorithm)) {
+            if (KeyStoreProviderImpl.ensureBcFipsProviderRegistered()) {
+                encryptor.setProviderName(KeyStoreProviderImpl.BCFIPS_PROVIDER);
+            }
         }
+        if (!LEGACY_PBE_ALGORITHM.equals(algorithm)) {
+            // AES based algorithms need an IV; use FIPS-compatible generators instead of Jasypt's SHA1PRNG defaults
+            encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
+            encryptor.setIvGenerator(new FipsRandomIvGenerator());
+        }
+        return encryptor;
     }
 
     byte[] encode(char[] passwd) {
@@ -123,15 +142,11 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             return toBytes(passwd);
         }
 
-        ensureBcFipsProviderAvailable();
+        return encodeWithAlgorithm(passwd, FIPS_PBE_ALGORITHM);
+    }
 
-        // encrypt the password
-        StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
-        // Use FIPS-compatible algorithm and generators
-        encryptor.setAlgorithm(FIPS_PBE_ALGORITHM);
-        encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
-        encryptor.setIvGenerator(new FipsRandomIvGenerator());
-
+    byte[] encodeWithAlgorithm(char[] passwd, String algorithm) {
+        StandardPBEByteEncryptor encryptor = newEncryptor(algorithm);
         char[] key = key();
         try {
             encryptor.setPasswordCharArray(key);
@@ -146,48 +161,42 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             return passwd;
         }
 
-        // Try FIPS-compatible algorithm first
-        try {
-            return decodeWithAlgorithm(passwd, FIPS_PBE_ALGORITHM);
-        } catch (Exception e) {
-            // If FIPS algorithm failed and we're not in FIPS mode, try legacy algorithm
-            if (!KeyStoreProviderImpl.isFipsMode()) {
-                try {
-                    // Explicitly use the legacy algorithm (Jasypt's default is also PBEWithMD5AndDES,
-                    // but we specify it to avoid coupling to Jasypt internals)
-                    byte[] decoded = decodeWithAlgorithm(passwd, LEGACY_PBE_ALGORITHM);
-                    // Successfully decoded with legacy algorithm - migrate to FIPS algorithm
-                    LOGGER.info(
-                            "Master password was encrypted with legacy algorithm, migrating to FIPS-compatible algorithm");
-                    migrateToFipsAlgorithm(decoded);
-                    return decoded;
-                } catch (Exception legacyEx) {
-                    // Both algorithms failed
-                    throw new RuntimeException(
-                            "Failed to decrypt master password with both FIPS and legacy algorithms", e);
+        Exception failure = null;
+        for (String algorithm : KNOWN_PBE_ALGORITHMS) {
+            byte[] decoded;
+            try {
+                decoded = decodeWithAlgorithm(passwd, algorithm);
+            } catch (Exception e) {
+                if (failure == null) {
+                    failure = e;
+                } else {
+                    failure.addSuppressed(e);
                 }
-            } else {
-                // In FIPS mode and FIPS algorithm failed - probably legacy encrypted
-                throw new RuntimeException(
-                        "Failed to decrypt master password in FIPS mode. "
-                                + "The password may have been encrypted with a legacy algorithm (PBEWithMD5AndDES). "
-                                + "Please migrate your security directory on a non-FIPS system first, or delete the security directory to start fresh.",
-                        e);
+                continue;
             }
+            if (!FIPS_PBE_ALGORITHM.equals(algorithm)) {
+                // Readable, but not with the current algorithm: re-encrypt so the next read succeeds directly and
+                // the file can be read once legacy algorithms are blocked by an OS level FIPS policy
+                LOGGER.info("Master password was encrypted with " + algorithm + ", migrating to " + FIPS_PBE_ALGORITHM);
+                migrateToFipsAlgorithm(decoded);
+            }
+            return decoded;
         }
+
+        String message = "Failed to decrypt master password with " + KNOWN_PBE_ALGORITHMS + ". ";
+        if (KeyStoreProviderImpl.isFipsMode()) {
+            message += "The password may have been encrypted with the legacy PBEWithMD5AndDES algorithm, which is "
+                    + "blocked on FIPS enabled operating systems. Start GeoServer once with FIPS_MODE=true on a host "
+                    + "where OS level FIPS is disabled so the file is migrated, or delete the security directory to "
+                    + "start fresh.";
+        } else {
+            message += "The file may be corrupt or encrypted with a different key.";
+        }
+        throw new RuntimeException(message, failure);
     }
 
     private byte[] decodeWithAlgorithm(byte[] passwd, String algorithm) {
-        StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
-        if (algorithm != null) {
-            encryptor.setAlgorithm(algorithm);
-            // FIPS algorithm also needs FIPS-compatible salt/IV generators for decryption
-            if (FIPS_PBE_ALGORITHM.equals(algorithm)) {
-                ensureBcFipsProviderAvailable();
-                encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
-                encryptor.setIvGenerator(new FipsRandomIvGenerator());
-            }
-        }
+        StandardPBEByteEncryptor encryptor = newEncryptor(algorithm);
         char[] key = key();
         try {
             encryptor.setPasswordCharArray(key);
@@ -200,6 +209,7 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
     private void migrateToFipsAlgorithm(byte[] decryptedPassword) {
         // Work on a copy so the caller's array is not zeroed
         byte[] copy = java.util.Arrays.copyOf(decryptedPassword, decryptedPassword.length);
+        File tmpFile = null;
         try {
             Resource configDir = getConfigDir();
             URL url = config.getURL();
@@ -224,40 +234,49 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             }
             File parentDir = targetFile.getParentFile();
 
-            // Step 1: write new ciphertext to a temp file in the same directory (same filesystem)
-            File tmpFile = File.createTempFile("passwd", ".tmp", parentDir);
+            // Step 1: encrypt with the current algorithm; done before touching the file system so that an
+            // unavailable algorithm leaves no temp file behind
+            byte[] encoded;
             char[] passwd = toChars(copy);
             try {
-                try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
-                    fos.write(encode(passwd));
-                    fos.getFD().sync(); // fsync before rename
-                }
+                encoded = encode(passwd);
             } finally {
                 scramble(passwd);
             }
 
-            // Step 2: create backup of the original file
+            // Step 2: write new ciphertext to a temp file in the same directory (same filesystem)
+            tmpFile = File.createTempFile("passwd", ".tmp", parentDir);
+            try (FileOutputStream fos = new FileOutputStream(tmpFile)) {
+                fos.write(encoded);
+                fos.getFD().sync(); // fsync before rename
+            }
+
+            // Step 3: create backup of the original file
             File backupFile = new File(targetFile.getPath() + ".backup");
             java.nio.file.Files.copy(
                     targetFile.toPath(), backupFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             LOGGER.info("Created backup of master password file: " + backupFile.getPath());
 
-            // Step 3: atomic rename of temp file over original (atomic on POSIX if same filesystem)
+            // Step 4: atomic rename of temp file over original (atomic on POSIX if same filesystem)
             java.nio.file.Files.move(
                     tmpFile.toPath(),
                     targetFile.toPath(),
                     java.nio.file.StandardCopyOption.REPLACE_EXISTING,
                     java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+            tmpFile = null;
 
-            LOGGER.info("Successfully migrated master password to FIPS-compatible encryption");
+            LOGGER.info("Successfully migrated master password to " + FIPS_PBE_ALGORITHM);
         } catch (java.nio.file.AtomicMoveNotSupportedException amEx) {
             LOGGER.warning("Atomic rename not supported on this filesystem. "
                     + "Master password migration skipped — re-save via admin UI to upgrade.");
         } catch (Exception e) {
-            LOGGER.warning("Failed to migrate master password to FIPS algorithm: " + e.getMessage());
+            LOGGER.log(Level.WARNING, "Failed to migrate master password to " + FIPS_PBE_ALGORITHM + ": " + e, e);
             // Don't throw — we successfully decoded, migration is best-effort
         } finally {
             java.util.Arrays.fill(copy, (byte) 0);
+            if (tmpFile != null && tmpFile.exists() && !tmpFile.delete()) {
+                LOGGER.warning("Could not delete temporary master password file " + tmpFile.getPath());
+            }
         }
     }
 
