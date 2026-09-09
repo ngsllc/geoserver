@@ -51,6 +51,16 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     public static final String BCFIPS_PROVIDER = "BCFIPS";
     public static final String DEFAULT_SECRET_KEY_ALGORITHM = "AES";
 
+    /**
+     * Strong password based encryption algorithm used for the master password file, the {@code crypt2} password encoder
+     * and Wicket URL parameter encryption. This is the PKCS#12 PBE scheme (SHA-256 KDF, AES-256/CBC) as registered by
+     * the BouncyCastle FIPS provider; it is only resolvable once {@link #BCFIPS_PROVIDER} is registered, see
+     * {@link #ensureBcFipsProviderRegistered()}.
+     */
+    public static final String FIPS_PBE_ALGORITHM = "PBEWITHSHA256AND256BITAES-BC";
+
+    private static final String BCFIPS_PROVIDER_CLASS = "org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider";
+
     // Dynamic file names based on keystore type
     private String defaultFileName;
     private String preparedFileName;
@@ -268,42 +278,59 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         return BCFKS_KEYSTORE_TYPE;
     }
 
+    /**
+     * Registers the BouncyCastle FIPS provider ({@value #BCFIPS_PROVIDER}) with the JCA if it is on the classpath and
+     * not registered yet. The provider is appended with the lowest priority, so algorithms also offered by the JDK
+     * providers keep resolving to those; only BC specific names such as {@link #FIPS_PBE_ALGORITHM} resolve to BCFIPS.
+     *
+     * <p>Safe to call from any code path that needs a BCFIPS-only algorithm, in both FIPS and non-FIPS mode. Callers
+     * that cannot work without the provider should check the return value.
+     *
+     * @return {@code true} if the BCFIPS provider is registered after this call, {@code false} if it is not available
+     */
+    public static synchronized boolean ensureBcFipsProviderRegistered() {
+        if (Security.getProvider(BCFIPS_PROVIDER) != null) {
+            return true;
+        }
+        try {
+            Class<?> providerClass = Class.forName(BCFIPS_PROVIDER_CLASS);
+            java.security.Provider bcProvider = (java.security.Provider)
+                    providerClass.getDeclaredConstructor().newInstance();
+            Security.addProvider(bcProvider);
+            LOGGER.info("Successfully registered BouncyCastle FIPS provider");
+            return true;
+        } catch (ClassNotFoundException e) {
+            LOGGER.log(
+                    isFipsMode() ? Level.SEVERE : Level.FINE,
+                    "BouncyCastle FIPS provider not available in classpath. Ensure bc-fips dependency is included.");
+            return false;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle FIPS provider: " + e.getMessage(), e);
+            return false;
+        }
+    }
+
     private void ensureProviderAvailable(String keystoreType, String provider) {
         if (!BCFKS_KEYSTORE_TYPE.equals(keystoreType)) {
             return;
         }
-        if (provider != null && java.security.Security.getProvider(provider) == null) {
-            try {
-                if (BCFIPS_PROVIDER.equals(provider)) {
-                    // Load BouncyCastle FIPS provider
-                    try {
-                        Class<?> providerClass =
-                                Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider");
-                        java.security.Provider bcProvider = (java.security.Provider)
-                                providerClass.getDeclaredConstructor().newInstance();
-                        java.security.Security.addProvider(bcProvider);
-                        LOGGER.info("Successfully registered BouncyCastle FIPS provider");
-
-                        // Validate that the provider supports required algorithms
-                        validateProviderSupport(bcProvider);
-                    } catch (ClassNotFoundException e) {
-                        LOGGER.log(
-                                Level.SEVERE,
-                                "BouncyCastle FIPS provider not available in classpath. "
-                                        + "Ensure bc-fips dependency is included.",
-                                e);
-                        throw new RuntimeException("BouncyCastle FIPS provider required but not available", e);
-                    } catch (Exception e) {
-                        LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle FIPS provider: " + e.getMessage(), e);
-                        throw new RuntimeException("Failed to register BouncyCastle FIPS provider", e);
-                    }
-                }
-            } catch (RuntimeException e) {
-                throw e;
-            } catch (Exception e) {
-                LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle provider: " + e.getMessage(), e);
-                throw new RuntimeException("Failed to register BouncyCastle provider", e);
-            }
+        if (provider == null || Security.getProvider(provider) != null) {
+            return;
+        }
+        if (!BCFIPS_PROVIDER.equals(provider)) {
+            return;
+        }
+        if (!ensureBcFipsProviderRegistered()) {
+            throw new RuntimeException("BouncyCastle FIPS provider required but not available");
+        }
+        try {
+            // Validate that the freshly registered provider supports required algorithms
+            validateProviderSupport(Security.getProvider(BCFIPS_PROVIDER));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.log(Level.SEVERE, "Failed to validate BouncyCastle FIPS provider: " + e.getMessage(), e);
+            throw new RuntimeException("Failed to validate BouncyCastle FIPS provider", e);
         }
     }
 
