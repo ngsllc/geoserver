@@ -70,17 +70,13 @@ public class RESTECQLPanelTest extends GeoServerWicketTestSupport {
                         + "'/${1}/${4}/${5}/${6}/${0}')";
         // Set the root directory
         FormTester form2 = tester.newFormTester("form");
-        form2.setValue(
-                "settings:settingsContainer:otherSettings:extensions:0:content:ecqlexp",
-                expression);
+        form2.setValue("settings:settingsContainer:otherSettings:extensions:0:content:ecqlexp", expression);
         form2.submit();
         // Check if no error has been found
         tester.assertNoErrorMessage();
         // Control if the defined root has been correctly set
         assertEquals(
-                gs.getSettings(citeWorkspace)
-                        .getMetadata()
-                        .get(RESTUploadECQLPathMapper.EXPRESSION_KEY, String.class),
+                gs.getSettings(citeWorkspace).getMetadata().get(RESTUploadECQLPathMapper.EXPRESSION_KEY, String.class),
                 expression);
     }
 
@@ -106,10 +102,7 @@ public class RESTECQLPanelTest extends GeoServerWicketTestSupport {
         tester.assertNoErrorMessage();
         // Control if the defined root has been correctly set
         assertEquals(
-                gs.getGlobal()
-                        .getSettings()
-                        .getMetadata()
-                        .get(RESTUploadECQLPathMapper.EXPRESSION_KEY, String.class),
+                gs.getGlobal().getSettings().getMetadata().get(RESTUploadECQLPathMapper.EXPRESSION_KEY, String.class),
                 expression);
     }
 }

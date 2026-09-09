@@ -1,12 +1,12 @@
 .. _security_fips_dev:
 
 FIPS Development
-===============
+================
 
 This section provides information for developers working with FIPS-compliant features in GeoServer.
 
 FIPS-aware keystore handling
----------------------------
+----------------------------
 
 GeoServer's ``KeyStoreProviderImpl`` detects FIPS mode using the following priority:
 
@@ -24,7 +24,7 @@ not present.
    FIPS mode will remain enabled. OS-level FIPS cannot be overridden by application configuration.
 
 Key Features
-~~~~~~~~~~~
+~~~~~~~~~~~~
 
 * **Automatic FIPS Detection**: Detects OS-level FIPS first (highest priority, immutable), then system properties, then environment variables
 * **Filename Inference**: Infers keystore type from extension
@@ -34,7 +34,7 @@ Key Features
 * **Thread Safety**: Synchronized keystore operations prevent race conditions during concurrent access
 
 Implementation Details
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 Building with FIPS Support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -59,8 +59,52 @@ GeoServer includes BC-FIPS libraries by default. No special profiles are needed.
   2. System property ``FIPS_MODE``
   3. Environment variable ``FIPS_MODE``
 
-* ``GeoServerPBEPasswordEncoder.ensureProviderAvailableIfRequested()`` loads FIPS provider when needed
+* ``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` registers the BCFIPS provider on demand; it is the
+  single registration point used by the keystore provider, ``GeoServerPBEPasswordEncoder``,
+  ``URLMasterPasswordProvider`` and ``GeoserverWicketEncrypterFactory``
 * Automatic keystore type selection: BCFKS (FIPS) or JCEKS (non-FIPS)
+
+Password-Based Encryption Algorithms
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+All strong password-based encryption uses one algorithm, ``KeyStoreProviderImpl.FIPS_PBE_ALGORITHM``
+(``PBEWITHSHA256AND256BITAES-BC``: PKCS#12 key derivation with SHA-256, AES-256/CBC). BC-FIPS registers this
+name; the stock BouncyCastle name ``PBEWITHSHA256AND256BITAES-CBC-BC`` and the SunJCE PBES2 names do **not**
+exist in BC-FIPS, so never hardcode an algorithm string. Reference the constant and call
+``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` before building a Jasypt encryptor for it, then pin
+the encryptor with ``setProviderName(KeyStoreProviderImpl.BCFIPS_PROVIDER)`` so the lookup does not depend on
+provider ordering. The constant is consumed by:
+
+* ``applicationSecurityContext.xml`` as the default of the ``strongPbePasswordEncoder`` bean (overridable with
+  the ``geoserver.encryption.algorithm`` and ``geoserver.encryption.provider`` system properties)
+* ``URLMasterPasswordProvider`` for the encrypted master password file
+* ``GeoserverWicketEncrypterFactory`` for URL parameter encryption
+
+**Keystore keys and stored passwords.** Two generations of keystore keys exist. Keys created before FIPS
+support are the raw bytes of a 40 character random password stored as a ``PBE`` key; keys created with FIPS
+support are 256 bit AES keys derived with SHA-256 (``KeyStoreProviderImpl.deriveAesKey``). BCFKS rejects the
+``PBE`` label and enforces AES key sizes, so ``KeyStoreProviderImpl.toBcfksSecretKey`` relabels legacy keys as
+``HmacSHA256`` entries (``LEGACY_SECRET_KEY_ALGORITHM``) when a keystore is migrated or its master password is
+changed; the bytes are never altered. ``GeoServerPBEPasswordEncoder.isLegacyKey`` uses the label to pick the
+matching Jasypt setup (``KeyMaterial``): legacy keys use the key characters as password and the PKCS#12 derived
+IV, exactly like upstream GeoServer with stock BouncyCastle, so ``crypt1:``/``crypt2:`` values written by
+earlier versions decrypt unchanged; AES keys use the Base64 form of the key and an explicit random IV. The
+format is a property of the key, never of the individual value. ``LegacyPasswordCompatibilityTest`` and
+``FipsBootMigrationTest`` pin this behaviour with values encrypted by upstream 2.28 under the test keystore
+key (``LegacyPasswordFixtures``).
+
+In FIPS mode ``GeoServerSecurityManager.ensureFipsCompatibleConfigPasswordEncoder`` runs before the security
+directory migrations and switches a configuration password encoder that reports
+``isAvailableInFipsMode() == false`` to the strong encoder, persisting ``config.xml``.
+
+``URLMasterPasswordProvider.decode()`` tries the algorithms in ``KNOWN_PBE_ALGORITHMS`` in order: the current
+algorithm, ``PBEWithHmacSHA256AndAES_128`` (used by earlier FIPS builds) and the legacy ``PBEWithMD5AndDES``.
+A file readable only with one of the fallbacks is re-encrypted with the current algorithm through a temp
+file, a ``.backup`` copy and an atomic rename. The fallbacks are attempted in FIPS mode too, so that the
+documented migration (one start with ``FIPS_MODE=true`` on a host without OS-level FIPS) can read legacy
+files; on an OS with FIPS enforced the JVM rejects MD5/DES and the decode fails with a message pointing at the
+migration procedure. When adding a new algorithm, append the previous one to ``KNOWN_PBE_ALGORITHMS`` and add
+a ciphertext fixture to ``JasyptDecodeTest`` so existing data directories stay readable.
 
 Core Implementation
 ^^^^^^^^^^^^^^^^^^^
@@ -74,7 +118,7 @@ The core keystore provider implements the following key methods:
    provider.refreshKeyStoreType();
 
 Configuration
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 Configure via a single environment variable:
 
@@ -86,22 +130,29 @@ When ``FIPS_MODE=true``:
 
 When ``FIPS_MODE=false`` or unset:
 * Keystore Type: JCEKS (automatic)
-* Provider: SunJCE (default)
+* Provider: SunJCE (default) for the keystore; BCFIPS is still registered on demand for password-based
+  encryption
 
 Testing FIPS behavior
 ~~~~~~~~~~~~~~~~~~~~~
 
-Unit tests cover default type selection and provider resolution. For manual checks, set
-``FIPS_MODE=true`` (or ``-DFIPS_MODE=true``) and verify BCFKS keystore usage in logs.
+Unit tests cover default type selection and provider resolution. ``JasyptDecodeTest`` (``gs-main``) checks
+the algorithm round trips, decodes fixtures written with the legacy and previous algorithms and runs the
+decode chain with ``FIPS_MODE=true``; ``URLMasterPasswordProviderTest`` (``security-tests``) verifies that
+legacy and previous-algorithm master password files are migrated with a backup and no leftover temp files.
+Note that the system test harness cannot boot with ``FIPS_MODE=true`` set for the whole JVM, so FIPS-mode
+behaviour is covered by unit tests and by ``FipsModeSwitchingIntegrationTest``, which toggles the property
+per test. For manual checks, set ``FIPS_MODE=true`` (or ``-DFIPS_MODE=true``) and verify BCFKS keystore usage
+in the logs.
 
 Integration with Security Framework
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use ``GeoServerSecurityManager#getKeyStoreProvider()`` to access the active provider; keystore
 type and provider are resolved internally based on configuration and environment.
 
 Development Guidelines
---------------------
+----------------------
 
 When developing FIPS-compliant features:
 
@@ -184,7 +235,7 @@ For manual migration to BCFKS:
      -destkeystore /path/to/data/security/geoserver.bcfks -deststoretype BCFKS -deststorepass "$MASTER" -noprompt
 
 Debugging FIPS Issues
---------------------
+---------------------
 
 Common debugging techniques for FIPS-related issues:
 
@@ -224,7 +275,7 @@ Common debugging techniques for FIPS-related issues:
       }
 
 Performance Considerations
-------------------------
+--------------------------
 
 FIPS-compliant cryptographic operations may have performance implications:
 
@@ -233,7 +284,7 @@ FIPS-compliant cryptographic operations may have performance implications:
 * **CPU Usage**: Cryptographic operations may use more CPU resources
 
 Best Practices
--------------
+--------------
 
 1. **Use Appropriate Algorithms**: Choose FIPS-approved algorithms for your use case
 2. **Implement Proper Error Handling**: Handle cryptographic exceptions gracefully
@@ -242,7 +293,7 @@ Best Practices
 5. **Monitor Performance**: Monitor performance impact of FIPS operations
 
 Compliance Standards
--------------------
+--------------------
 
 When developing FIPS-compliant features, ensure compliance with the following standards:
 

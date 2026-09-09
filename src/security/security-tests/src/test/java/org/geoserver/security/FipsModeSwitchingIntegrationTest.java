@@ -45,11 +45,13 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
     private static final String TEST_PASSWORD = "testPassword123!";
 
     private String originalFipsMode;
+    private boolean bcFipsProviderPreRegistered;
 
     @Before
     public void saveOriginalFipsMode() {
         originalFipsMode = System.getProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
         LOGGER.log(Level.FINE, "Original FIPS mode setting: " + originalFipsMode);
+        bcFipsProviderPreRegistered = java.security.Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null;
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
     }
 
@@ -62,6 +64,11 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         }
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
         getSecurityManager().getKeyStoreProvider().reloadKeyStore();
+        // Undo any BC-FIPS provider registration triggered by this test, so it doesn't leak into
+        // other test classes sharing this JVM
+        if (!bcFipsProviderPreRegistered) {
+            java.security.Security.removeProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER);
+        }
         LOGGER.log(Level.FINE, "Restored FIPS mode to: " + originalFipsMode);
     }
 
@@ -116,10 +123,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertTrue("Secret should exist after FIPS switch", ksp.containsAlias(TEST_SECRET_ALIAS));
         SecretKey fipsKey = ksp.getSecretKey(TEST_SECRET_ALIAS);
         assertNotNull("FIPS key should not be null", fipsKey);
-        assertArrayEquals(
-                "Key bytes should be preserved after FIPS switch",
-                originalKeyBytes,
-                fipsKey.getEncoded());
+        assertArrayEquals("Key bytes should be preserved after FIPS switch", originalKeyBytes, fipsKey.getEncoded());
         LOGGER.fine("Secret preserved after switching to BCFKS");
 
         // Step 3: Switch back to non-FIPS mode
@@ -130,10 +134,7 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         assertTrue("Secret should exist after switching back", ksp.containsAlias(TEST_SECRET_ALIAS));
         SecretKey restoredKey = ksp.getSecretKey(TEST_SECRET_ALIAS);
         assertNotNull("Restored key should not be null", restoredKey);
-        assertArrayEquals(
-                "Key bytes should be preserved after round-trip",
-                originalKeyBytes,
-                restoredKey.getEncoded());
+        assertArrayEquals("Key bytes should be preserved after round-trip", originalKeyBytes, restoredKey.getEncoded());
         LOGGER.fine("Secret preserved after switching back to JCEKS");
 
         LOGGER.fine("Test passed: Secret keys preserved across mode switches");

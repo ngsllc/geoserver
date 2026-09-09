@@ -60,7 +60,7 @@
     <!-- FIPS Compliance: Legacy weak crypto algorithm used only for migration from legacy data.
          MD5/DES (PBEWithMD5AndDES) is only used to decrypt existing master passwords that were
          encrypted before FIPS support was added. This only happens in non-FIPS mode, and the
-         password is immediately re-encrypted with FIPS-approved algorithm (PBEWithHmacSHA256AndAES_128).
+         password is immediately re-encrypted with FIPS-approved algorithm (PBEWITHSHA256AND256BITAES-BC).
          In FIPS mode, any attempt to use MD5/DES is explicitly rejected with a clear error message.
          See URLMasterPasswordProvider.decode() for the migration logic. -->
     <Match>
