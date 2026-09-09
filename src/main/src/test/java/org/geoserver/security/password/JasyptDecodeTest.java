@@ -10,11 +10,15 @@ import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 
 import java.nio.charset.StandardCharsets;
+import java.security.Security;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import org.apache.commons.codec.binary.Base64;
+import org.geoserver.security.KeyStoreProviderImpl;
 import org.geotools.util.logging.Logging;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
+import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 /** Test to verify Jasypt decryption behavior with different algorithm configurations. */
@@ -24,6 +28,29 @@ public class JasyptDecodeTest {
 
     private static final String PASSWORD = "testpassword";
     private static final byte[] KEY = "geoserver".getBytes(StandardCharsets.UTF_8);
+
+    private boolean bcFipsProviderPreRegistered;
+
+    @Before
+    public void registerBcFipsProvider() throws Exception {
+        // The FIPS algorithm below is only implemented by BC-FIPS; production code registers the
+        // provider lazily via KeyStoreProviderImpl, which this standalone test never triggers.
+        bcFipsProviderPreRegistered = Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null;
+        if (!bcFipsProviderPreRegistered) {
+            Security.addProvider(
+                    (java.security.Provider) Class.forName("org.bouncycastle.jcajce.provider.BouncyCastleFipsProvider")
+                            .getDeclaredConstructor()
+                            .newInstance());
+        }
+    }
+
+    @After
+    public void deregisterBcFipsProvider() {
+        // Don't leak the provider into other test classes sharing this JVM
+        if (!bcFipsProviderPreRegistered) {
+            Security.removeProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER);
+        }
+    }
 
     /**
      * Compatibility contract for pre-FIPS on-disk artifacts: data encrypted with an explicit PBEWithMD5AndDES (how
