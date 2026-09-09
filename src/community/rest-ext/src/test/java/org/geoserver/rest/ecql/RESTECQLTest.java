@@ -29,15 +29,15 @@ import org.geoserver.config.GeoServerInfo;
 import org.geoserver.config.impl.SettingsInfoImpl;
 import org.geoserver.data.test.MockData;
 import org.geoserver.rest.util.RESTUtils;
+import org.geotools.api.feature.simple.SimpleFeature;
+import org.geotools.api.feature.simple.SimpleFeatureType;
+import org.geotools.api.filter.expression.Expression;
 import org.geotools.data.DataUtilities;
 import org.geotools.feature.SchemaException;
 import org.geotools.feature.simple.SimpleFeatureBuilder;
 import org.geotools.filter.text.cql2.CQLException;
 import org.geotools.filter.text.ecql.ECQL;
 import org.junit.Test;
-import org.geotools.api.feature.simple.SimpleFeature;
-import org.geotools.api.feature.simple.SimpleFeatureType;
-import org.geotools.api.filter.expression.Expression;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.w3c.dom.Document;
 import org.xml.sax.SAXException;
@@ -77,8 +77,7 @@ public class RESTECQLTest extends CatalogRESTTestSupport {
     @Test
     public void testSubString() throws Exception {
         // SubString expression
-        String expression =
-                "if_then_else(strEndsWith(name,'.tiff'),Concatenate(strSubstring(path, 0, 4),'/',name),'')";
+        String expression = "if_then_else(strEndsWith(name,'.tiff'),Concatenate(strSubstring(path, 0, 4),'/',name),'')";
         // Testing of the defined exception
         testExpression("test2", "mosaic_test2", expression, fileNames);
     }
@@ -105,11 +104,10 @@ public class RESTECQLTest extends CatalogRESTTestSupport {
     }
 
     /**
-     * Private method for adding the selected coverage inside the defined workspace via REST and
-     * then checking if the coverage has been placed inside the defined directory
+     * Private method for adding the selected coverage inside the defined workspace via REST and then checking if the
+     * coverage has been placed inside the defined directory
      */
-    private void testExpression(
-            String workspace, String coverageStore, String expression, List<String> fileNames)
+    private void testExpression(String workspace, String coverageStore, String expression, List<String> fileNames)
             throws IOException, Exception, ParserConfigurationException, SAXException {
         // Initial Settings
         initialSetup(expression);
@@ -127,15 +125,10 @@ public class RESTECQLTest extends CatalogRESTTestSupport {
         createWorkSpace(workspace);
 
         // Uploading the file via rest
-        MockHttpServletResponse response =
-                putAsServletResponse(
-                        "/rest/workspaces/"
-                                + workspace
-                                + "/coveragestores/"
-                                + coverageStore
-                                + "/file.imagemosaic",
-                        bytes,
-                        "application/zip");
+        MockHttpServletResponse response = putAsServletResponse(
+                "/rest/workspaces/" + workspace + "/coveragestores/" + coverageStore + "/file.imagemosaic",
+                bytes,
+                "application/zip");
         assertEquals(201, response.getStatus());
         // Check if the coverage is present
         String content = response.getContentAsString();
@@ -157,16 +150,14 @@ public class RESTECQLTest extends CatalogRESTTestSupport {
     }
 
     /** Private method for creating a new file object associated to the input path. */
-    private File extractFile(
-            String expression, CoverageStoreInfo cs, String itemPath, String filename)
+    private File extractFile(String expression, CoverageStoreInfo cs, String itemPath, String filename)
             throws CQLException {
         // Url to the final element
         String url = cs.getURL();
         // Convert the String expression into a CQL expression
         Expression exp = ECQL.toExpression(expression);
         // Feature associated to the input path
-        SimpleFeature feature =
-                SimpleFeatureBuilder.build(type, new Object[] {itemPath, filename}, null);
+        SimpleFeature feature = SimpleFeatureBuilder.build(type, new Object[] {itemPath, filename}, null);
         // Perform Regular Expression match
         String newPath = exp.evaluate(feature, String.class);
         // Final FILE creation
@@ -183,8 +174,7 @@ public class RESTECQLTest extends CatalogRESTTestSupport {
         // Creation of a new Workspace called "test"
         String xml = "<workspace>" + "<name>" + workspace + "</name>" + "</workspace>";
 
-        MockHttpServletResponse responseBefore =
-                postAsServletResponse("/rest/workspaces", xml, "text/xml");
+        MockHttpServletResponse responseBefore = postAsServletResponse("/rest/workspaces", xml, "text/xml");
         assertEquals(201, responseBefore.getStatus());
         assertNotNull(responseBefore.getHeader("Location"));
         assertTrue(responseBefore.getHeader("Location").endsWith("/workspaces/" + workspace));

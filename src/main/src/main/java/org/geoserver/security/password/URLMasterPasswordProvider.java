@@ -181,10 +181,9 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             URL url = config.getURL();
 
             if (!"file".equalsIgnoreCase(url.getProtocol())) {
-                LOGGER.info(
-                        "Master password is stored at a non-file URL; "
-                                + "automatic migration is not supported. "
-                                + "Re-save the master password via the admin UI to upgrade to FIPS-compatible encryption.");
+                LOGGER.info("Master password is stored at a non-file URL; "
+                        + "automatic migration is not supported. "
+                        + "Re-save the master password via the admin UI to upgrade to FIPS-compatible encryption.");
                 return;
             }
 
@@ -216,9 +215,7 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             // Step 2: create backup of the original file
             File backupFile = new File(targetFile.getPath() + ".backup");
             java.nio.file.Files.copy(
-                    targetFile.toPath(),
-                    backupFile.toPath(),
-                    java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    targetFile.toPath(), backupFile.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             LOGGER.info("Created backup of master password file: " + backupFile.getPath());
 
             // Step 3: atomic rename of temp file over original (atomic on POSIX if same filesystem)
@@ -230,9 +227,8 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
 
             LOGGER.info("Successfully migrated master password to FIPS-compatible encryption");
         } catch (java.nio.file.AtomicMoveNotSupportedException amEx) {
-            LOGGER.warning(
-                    "Atomic rename not supported on this filesystem. "
-                            + "Master password migration skipped — re-save via admin UI to upgrade.");
+            LOGGER.warning("Atomic rename not supported on this filesystem. "
+                    + "Master password migration skipped — re-save via admin UI to upgrade.");
         } catch (Exception e) {
             LOGGER.warning("Failed to migrate master password to FIPS algorithm: " + e.getMessage());
             // Don't throw — we successfully decoded, migration is best-effort

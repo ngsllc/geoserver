@@ -95,10 +95,9 @@ public class JasyptPBEPasswordEncoderWrapper extends AbstractGeoserverPasswordEn
 
     private synchronized void checkInitialization() {
         if (this.useTextEncryptor == null) {
-            throw new EncryptionInitializationException(
-                    "PBE Password encoder not initialized: neither text encryptor "
-                            + "nor PBE string encryptor has been set. "
-                            + "Call setPbeStringEncryptor() or setTextEncryptor() before use.");
+            throw new EncryptionInitializationException("PBE Password encoder not initialized: neither text encryptor "
+                    + "nor PBE string encryptor has been set. "
+                    + "Call setPbeStringEncryptor() or setTextEncryptor() before use.");
         } else if (this.useTextEncryptor) {
             if (this.textEncryptor == null) {
                 throw new EncryptionInitializationException(
