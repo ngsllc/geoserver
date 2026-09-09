@@ -1320,6 +1320,23 @@
         <plugin>
           <artifactId>maven-dependency-plugin</artifactId>
           <version>3.3.0</version>
+          <!-- Copy BC-FIPS libs to fips-libs directory for packaging.
+               Declared here so it only runs in modules that
+               explicitly activate it (e.g., web/app WAR module). -->
+          <executions>
+            <execution>
+              <id>copy-fips-libs</id>
+              <phase>prepare-package</phase>
+              <goals>
+                <goal>copy-dependencies</goal>
+              </goals>
+              <configuration>
+                <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
+                <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
+                <stripVersion>true</stripVersion>
+              </configuration>
+            </execution>
+          </executions>
         </plugin>
         <plugin>
           <artifactId>maven-eclipse-plugin</artifactId>
@@ -1421,27 +1438,6 @@
           <groupId>com.github.spotbugs</groupId>
           <artifactId>spotbugs-maven-plugin</artifactId>
           <version>4.9.7.0</version>
-        </plugin>
-        <!-- Copy BC-FIPS libs to fips-libs directory for packaging.
-             Declared in pluginManagement so it only runs in modules that
-             explicitly activate it (e.g., web/app WAR module). -->
-        <plugin>
-          <groupId>org.apache.maven.plugins</groupId>
-          <artifactId>maven-dependency-plugin</artifactId>
-          <executions>
-            <execution>
-              <id>copy-fips-libs</id>
-              <phase>prepare-package</phase>
-              <goals>
-                <goal>copy-dependencies</goal>
-              </goals>
-              <configuration>
-                <outputDirectory>${project.build.directory}/fips-libs</outputDirectory>
-                <includeArtifactIds>bc-fips,bcpkix-fips</includeArtifactIds>
-                <stripVersion>true</stripVersion>
-              </configuration>
-            </execution>
-          </executions>
         </plugin>
       </plugins>
     </pluginManagement>
