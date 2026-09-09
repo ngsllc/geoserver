@@ -72,7 +72,7 @@ public class JasyptDecodeTest {
     public void testFipsEncodeDecode() throws Exception {
         // Encode with FIPS algorithm
         StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
-        encryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-CBC-BC");
+        encryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
         encryptor.setSaltGenerator(new FipsRandomSaltGenerator());
         encryptor.setIvGenerator(new FipsRandomIvGenerator());
         encryptor.setPassword(new String(KEY));
@@ -82,7 +82,7 @@ public class JasyptDecodeTest {
 
         // Decode with FIPS algorithm - also needs salt/IV generators set
         StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
-        decryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-CBC-BC");
+        decryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
         decryptor.setSaltGenerator(new FipsRandomSaltGenerator());
         decryptor.setIvGenerator(new FipsRandomIvGenerator());
         decryptor.setPassword(new String(KEY));
@@ -102,7 +102,7 @@ public class JasyptDecodeTest {
         // Try to decode with FIPS algorithm first (should fail)
         try {
             StandardPBEByteEncryptor decryptor = new StandardPBEByteEncryptor();
-            decryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-CBC-BC");
+            decryptor.setAlgorithm("PBEWITHSHA256AND256BITAES-BC");
             decryptor.setPassword(new String(KEY));
             decryptor.decrypt(Base64.decodeBase64(encoded));
             fail("Should have failed to decode with FIPS algorithm");
