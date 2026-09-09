@@ -1,12 +1,12 @@
 .. _security_fips_dev:
 
 FIPS Development
-===============
+================
 
 This section provides information for developers working with FIPS-compliant features in GeoServer.
 
 FIPS-aware keystore handling
----------------------------
+----------------------------
 
 GeoServer's ``KeyStoreProviderImpl`` detects FIPS mode using the following priority:
 
@@ -24,7 +24,7 @@ not present.
    FIPS mode will remain enabled. OS-level FIPS cannot be overridden by application configuration.
 
 Key Features
-~~~~~~~~~~~
+~~~~~~~~~~~~
 
 * **Automatic FIPS Detection**: Detects OS-level FIPS first (highest priority, immutable), then system properties, then environment variables
 * **Filename Inference**: Infers keystore type from extension
@@ -34,7 +34,7 @@ Key Features
 * **Thread Safety**: Synchronized keystore operations prevent race conditions during concurrent access
 
 Implementation Details
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~
 
 Building with FIPS Support
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -101,7 +101,7 @@ The core keystore provider implements the following key methods:
    provider.refreshKeyStoreType();
 
 Configuration
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 Configure via a single environment variable:
 
@@ -129,13 +129,13 @@ per test. For manual checks, set ``FIPS_MODE=true`` (or ``-DFIPS_MODE=true``) an
 in the logs.
 
 Integration with Security Framework
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use ``GeoServerSecurityManager#getKeyStoreProvider()`` to access the active provider; keystore
 type and provider are resolved internally based on configuration and environment.
 
 Development Guidelines
---------------------
+----------------------
 
 When developing FIPS-compliant features:
 
@@ -218,7 +218,7 @@ For manual migration to BCFKS:
      -destkeystore /path/to/data/security/geoserver.bcfks -deststoretype BCFKS -deststorepass "$MASTER" -noprompt
 
 Debugging FIPS Issues
---------------------
+---------------------
 
 Common debugging techniques for FIPS-related issues:
 
@@ -258,7 +258,7 @@ Common debugging techniques for FIPS-related issues:
       }
 
 Performance Considerations
-------------------------
+--------------------------
 
 FIPS-compliant cryptographic operations may have performance implications:
 
@@ -267,7 +267,7 @@ FIPS-compliant cryptographic operations may have performance implications:
 * **CPU Usage**: Cryptographic operations may use more CPU resources
 
 Best Practices
--------------
+--------------
 
 1. **Use Appropriate Algorithms**: Choose FIPS-approved algorithms for your use case
 2. **Implement Proper Error Handling**: Handle cryptographic exceptions gracefully
@@ -276,7 +276,7 @@ Best Practices
 5. **Monitor Performance**: Monitor performance impact of FIPS operations
 
 Compliance Standards
--------------------
+--------------------
 
 When developing FIPS-compliant features, ensure compliance with the following standards:
 

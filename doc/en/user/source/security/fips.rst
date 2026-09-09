@@ -17,7 +17,7 @@ GeoServer includes a FIPS-aware keystore provider that can operate in FIPS-enabl
 On systems with OS-level FIPS enabled, GeoServer automatically operates in FIPS mode without any additional configuration. The ``FIPS_MODE`` setting cannot disable FIPS on these systems.
 
 FIPS KeyStore Provider
----------------------
+----------------------
 
 GeoServer's keystore provider automatically:
 
@@ -28,7 +28,7 @@ GeoServer's keystore provider automatically:
 * Configures appropriate keystore types for FIPS environments
 
 Configuration
-------------
+-------------
 
 Environment Variable
 ~~~~~~~~~~~~~~~~~~~~
@@ -51,7 +51,7 @@ When ``FIPS_MODE=false`` or unset:
   passwords and URL parameter encryption always use the FIPS algorithm (see below)
 
 Keystore Types
--------------
+--------------
 
 GeoServer automatically selects the keystore type based on FIPS mode:
 
@@ -136,7 +136,7 @@ To enable FIPS mode:
    FIPS_MODE=true ./bin/startup.sh
 
 Verification
------------
+------------
 
 You can verify FIPS mode is active by checking the GeoServer logs for messages like:
 
@@ -146,10 +146,10 @@ You can verify FIPS mode is active by checking the GeoServer logs for messages l
    INFO - Successfully registered standard BouncyCastle provider as fallback
 
 Troubleshooting
---------------
+---------------
 
 Common Issues
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 1. **FIPS Provider Not Available**
    
@@ -210,7 +210,7 @@ To enable debug logging for FIPS operations, add the following to your logging c
    org.geoserver.security.KeyStoreProviderImpl=DEBUG
 
 Security Considerations
----------------------
+-----------------------
 
 * **Password Management**: Always use strong passwords for keystores in FIPS environments
 * **Key Storage**: Store cryptographic keys securely and rotate them regularly
@@ -219,7 +219,7 @@ Security Considerations
 * **Compliance**: Ensure all cryptographic operations meet your organization's compliance requirements
 
 Compliance Standards
--------------------
+--------------------
 
 The FIPS keystore provider is designed to support:
 

@@ -17,6 +17,7 @@ import org.geoserver.security.KeyStoreProviderImpl;
 import org.geotools.util.logging.Logging;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
 import org.jasypt.exceptions.EncryptionOperationNotPossibleException;
+import org.junit.Assume;
 import org.junit.BeforeClass;
 import org.junit.Test;
 
@@ -34,6 +35,15 @@ public class JasyptDecodeTest {
         assertTrue("bc-fips must be on the test classpath", KeyStoreProviderImpl.ensureBcFipsProviderRegistered());
     }
 
+    /** Legacy PBEWithMD5AndDES is blocked by the JVM on an OS-level FIPS host; tests that need it are skipped there. */
+    static void assumeLegacyAlgorithmAvailable() {
+        try {
+            javax.crypto.Cipher.getInstance(URLMasterPasswordProvider.LEGACY_PBE_ALGORITHM);
+        } catch (Exception e) {
+            Assume.assumeNoException("legacy PBE algorithm not available on this JVM", e);
+        }
+    }
+
     /**
      * Master password file content ("geoserver") as written by GeoServer before FIPS support was added, that is
      * encrypted with the Jasypt default PBEWithMD5AndDES and the provider's internal key.
@@ -47,6 +57,7 @@ public class JasyptDecodeTest {
     /** Existing master password files must remain readable; if the key or permutation changes these fail on purpose. */
     @Test
     public void testDecodeLegacyFixture() throws Exception {
+        assumeLegacyAlgorithmAvailable();
         assertEquals("geoserver", decodeFixture(LEGACY_FIXTURE, URLMasterPasswordProvider.LEGACY_PBE_ALGORITHM));
     }
 
@@ -63,6 +74,7 @@ public class JasyptDecodeTest {
      */
     @Test
     public void testDecodeChainInFipsMode() throws Exception {
+        assumeLegacyAlgorithmAvailable();
         URLMasterPasswordProviderConfig config = new URLMasterPasswordProviderConfig();
         config.setName("test");
         config.setEncrypting(true);
@@ -96,6 +108,7 @@ public class JasyptDecodeTest {
 
     @Test
     public void testDefaultEncodeDecode() throws Exception {
+        assumeLegacyAlgorithmAvailable();
         // Encode with default algorithm (PBEWithMD5AndDES)
         StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
         encryptor.setPassword(new String(KEY));
@@ -150,6 +163,7 @@ public class JasyptDecodeTest {
 
     @Test
     public void testLegacyDataWithDefaultDecode() throws Exception {
+        assumeLegacyAlgorithmAvailable();
         // This is how data was encoded in original GeoServer (no algorithm set)
         StandardPBEByteEncryptor encryptor = new StandardPBEByteEncryptor();
         encryptor.setPassword(new String(KEY));
