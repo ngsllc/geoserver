@@ -23,7 +23,7 @@ Enabling FIPS Mode
 FIPS mode can be enabled through environment variables or system properties. **Note**: For full FIPS compliance, the operating system must also be configured for FIPS mode. GeoServer's FIPS implementation works in conjunction with OS-level FIPS settings.
 
 Environment Variables
-~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 Set the FIPS_MODE environment variable before starting GeoServer:
 
@@ -47,7 +47,7 @@ When ``FIPS_MODE=false`` or unset, GeoServer uses:
 
 
 Docker Container
-~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 
 For containerized deployments:
 
@@ -103,7 +103,7 @@ The same distribution works in both modes - no rebuild required!
 
 
 Keystore Configuration
----------------------
+----------------------
 
 GeoServer automatically selects the appropriate keystore format based on FIPS mode:
 
@@ -128,7 +128,7 @@ Used automatically when ``FIPS_MODE=false`` or unset:
 - **Compatibility**: Traditional Java keystore for backward compatibility
 
 Automatic Migration
-~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~
 
 GeoServer automatically handles keystore migration when switching between FIPS and non-FIPS modes:
 
@@ -184,7 +184,7 @@ If you prefer to manually convert an existing keystore:
 * Preserves all existing keys and certificates
 
 Verifying FIPS Mode
-------------------
+-------------------
 
 Check that FIPS mode is active by examining the GeoServer logs:
 
@@ -199,7 +199,7 @@ Server Status page also reports the FIPS mode and keystore type in use.
 **Important**: For complete FIPS compliance, ensure that the operating system is also configured for FIPS mode. GeoServer's FIPS implementation works in conjunction with OS-level FIPS settings to provide comprehensive security compliance.
 
 Environment Variable Reference
------------------------------
+------------------------------
 
 +------------------------+-------------+-------------------------------------------+
 | Variable               | Default     | Description                               |
@@ -210,10 +210,10 @@ Environment Variable Reference
 +------------------------+-------------+-------------------------------------------+
 
 Implementation Details
----------------------
+----------------------
 
 Provider Registration
-~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~
 
 The BouncyCastle FIPS provider (``BCFIPS``) is registered on demand by ``KeyStoreProviderImpl`` the first time
 it is needed, in both FIPS and non-FIPS mode:
@@ -303,7 +303,7 @@ The short version:
 6. Start GeoServer — FIPS mode activates automatically via ``/proc/sys/crypto/fips_enabled``
 
 Security Considerations
-----------------------
+-----------------------
 
 * **Key Management**: BCFKS provides enhanced key protection compared to JCEKS
 * **Algorithm Compliance**: FIPS mode ensures only approved cryptographic algorithms are used
@@ -312,10 +312,10 @@ Security Considerations
 * **OS-Level FIPS**: For complete compliance, the operating system must also be configured for FIPS mode
 
 Troubleshooting
---------------
+---------------
 
 Common Issues
-~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 **FIPS mode not detected**
 
@@ -357,7 +357,7 @@ FIPS mode. These passwords are **not** auto-migrated. Re-enter them through the 
 admin (they will be re-saved as ``crypt2:``).
 
 Log Analysis
-~~~~~~~~~~~
+~~~~~~~~~~~~
 
 Look for these log messages to verify FIPS operation:
 
