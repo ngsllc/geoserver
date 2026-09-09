@@ -45,11 +45,13 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
     private static final String TEST_PASSWORD = "testPassword123!";
 
     private String originalFipsMode;
+    private boolean bcFipsProviderPreRegistered;
 
     @Before
     public void saveOriginalFipsMode() {
         originalFipsMode = System.getProperty(KeyStoreProviderImpl.FIPS_MODE_ENV_VAR);
         LOGGER.log(Level.FINE, "Original FIPS mode setting: " + originalFipsMode);
+        bcFipsProviderPreRegistered = java.security.Security.getProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER) != null;
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
     }
 
@@ -62,6 +64,11 @@ public class FipsModeSwitchingIntegrationTest extends GeoServerSystemTestSupport
         }
         org.geoserver.data.test.SystemTestData.resetCachedKeystoreType();
         getSecurityManager().getKeyStoreProvider().reloadKeyStore();
+        // Undo any BC-FIPS provider registration triggered by this test, so it doesn't leak into
+        // other test classes sharing this JVM
+        if (!bcFipsProviderPreRegistered) {
+            java.security.Security.removeProvider(KeyStoreProviderImpl.BCFIPS_PROVIDER);
+        }
         LOGGER.log(Level.FINE, "Restored FIPS mode to: " + originalFipsMode);
     }
 
