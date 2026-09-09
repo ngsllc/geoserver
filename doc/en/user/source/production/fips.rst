@@ -296,7 +296,8 @@ See :ref:`fips_password_migration` in the Security section for the full step-by-
 The short version:
 
 1. Disable OS-level FIPS (``sudo fips-mode-setup --disable && sudo reboot``)
-2. ``export FIPS_MODE=true`` and start GeoServer — auto-migrates keystore and master password
+2. ``export FIPS_MODE=true`` and start GeoServer — auto-migrates the keystore and the master password and
+   switches a weak configuration password encoder to the strong one; ``crypt2:`` passwords keep working
 3. Re-enter any ``crypt1:`` passwords via the web UI (they become ``crypt2:``)
 4. Verify: ``geoserver.bcfks`` exists, ``grep -r 'crypt1:' <data-dir>/`` returns nothing
 5. Stop GeoServer, re-enable OS-level FIPS (``sudo fips-mode-setup --enable && sudo reboot``)
@@ -337,6 +338,23 @@ different GeoServer; restore ``passwd.backup`` or delete the ``security`` direct
 A warning ``Failed to migrate master password to PBEWITHSHA256AND256BITAES-BC`` means the file was read but
 could not be rewritten (for example a read-only ``security`` directory). GeoServer keeps running with the old
 file; fix the permissions so the migration can complete on the next start.
+
+**Weak password encoder in FIPS mode**
+
+A message ending in ``Algorithm 'PBEWITHMD5ANDDES' not available in FIPS mode`` means a component is still
+configured with the weak ``pbePasswordEncoder``. The configuration password encoder is switched to the
+strong encoder automatically at startup (a warning is logged), but a user/group service configured with
+the weak encoder has to be changed by hand: edit ``security/usergroup/<name>/config.xml`` and set
+``<passwordEncoderName>strongPbePasswordEncoder</passwordEncoderName>`` (or ``digestPasswordEncoder``),
+then re-set the affected user passwords.
+
+**Keystore key cannot be read after migration**
+
+``BCFKS KeyStore unable to recover secret key ... Provided key data wrong size for AES`` means the keystore
+was migrated by an earlier FIPS build that stored legacy keys as AES entries. Stop GeoServer, delete
+``security/geoserver.bcfks``, rename ``security/geoserver.jceks.backup`` to ``geoserver.jceks`` and start
+again on a host without OS-level FIPS: the migration now stores such keys as ``HmacSHA256`` entries and
+they stay readable.
 
 **Provider not found errors**
 
