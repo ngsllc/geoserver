@@ -4,7 +4,6 @@
  */
 package org.geoserver.security.password;
 
-import java.util.Objects;
 import org.jasypt.encryption.pbe.PBEStringEncryptor;
 import org.jasypt.exceptions.EncryptionInitializationException;
 import org.jasypt.util.text.TextEncryptor;
@@ -78,14 +77,23 @@ public class JasyptPBEPasswordEncoderWrapper extends AbstractGeoserverPasswordEn
     @Override
     public boolean isPasswordValid(String encPass, String rawPass, Object salt) {
         this.checkInitialization();
-        String decPassword = null;
-        if (this.useTextEncryptor) {
-            decPassword = this.textEncryptor.decrypt(encPass);
-        } else {
-            decPassword = this.pbeStringEncryptor.decrypt(encPass);
+        if (encPass == null || rawPass == null) {
+            return false;
         }
-
-        return Objects.equals(decPassword, rawPass);
+        String decPassword = null;
+        try {
+            if (this.useTextEncryptor) {
+                decPassword = this.textEncryptor.decrypt(encPass);
+            } else {
+                decPassword = this.pbeStringEncryptor.decrypt(encPass);
+            }
+        } catch (org.jasypt.exceptions.EncryptionOperationNotPossibleException e) {
+            // corrupt, or encrypted with another key: not this password
+            return false;
+        }
+        return java.security.MessageDigest.isEqual(
+                decPassword.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                rawPass.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
     @Override

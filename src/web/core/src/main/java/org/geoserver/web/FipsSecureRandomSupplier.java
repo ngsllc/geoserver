@@ -1,5 +1,4 @@
-/* (c) 2014 - 2016 Open Source Geospatial Foundation - all rights reserved
- * (c) 2001 - 2013 OpenPlans
+/* (c) 2026 Open Source Geospatial Foundation - all rights reserved
  * This code is licensed under the GPL 2.0 license, available at the root
  * application directory.
  */
@@ -7,22 +6,17 @@ package org.geoserver.web;
 
 import java.security.SecureRandom;
 import org.apache.wicket.core.random.ISecureRandomSupplier;
+import org.geoserver.security.FipsRuntime;
 
 /**
- * A FIPS-compatible SecureRandom supplier for Wicket.
- *
- * <p>This supplier uses the system default SecureRandom implementation instead of explicitly requesting SHA1PRNG, which
- * is not available in FIPS mode. In FIPS mode, the JVM will automatically use a FIPS-approved algorithm (such as DRBG).
- *
- * @author GeoServer Contributors
+ * Wicket's random source, taken from {@link FipsRuntime#secureRandom()}: the validated module's DRBG in FIPS mode,
+ * asked for by name so that provider order cannot hand the job to another provider, and the JVM default otherwise.
+ * Wicket's own supplier asks for {@code SHA1PRNG} by name, which no FIPS provider offers.
  */
 public class FipsSecureRandomSupplier implements ISecureRandomSupplier {
 
-    private static final SecureRandom INSTANCE = new SecureRandom();
-
     @Override
     public SecureRandom getRandom() {
-        // Use the default SecureRandom, which in FIPS mode will use a FIPS-approved algorithm
-        return INSTANCE;
+        return FipsRuntime.secureRandom();
     }
 }

@@ -5,7 +5,9 @@
  */
 package org.geoserver.security;
 
+import static org.geoserver.security.SecurityUtils.scramble;
 import static org.geoserver.security.SecurityUtils.toBytes;
+import static org.geoserver.security.SecurityUtils.toChars;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,7 +22,11 @@ import java.security.NoSuchProviderException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.Security;
+import java.util.Base64;
 import java.util.Enumeration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Function;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 import javax.crypto.SecretKey;
@@ -87,6 +93,13 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     protected volatile Resource keyStoreResource;
     protected volatile KeyStore ks;
 
+    /**
+     * Keys made from the stored secrets, see {@link KeyStoreProvider#getDerivedKey}. Cleared whenever the keystore
+     * contents change, so an entry can never outlive the secret it was made from. Changing the master password is not
+     * such a change: it locks the entries again, but the secrets stay the same.
+     */
+    private final Map<String, SecretKey> derivedKeys = new ConcurrentHashMap<>();
+
     GeoServerSecurityManager securityManager;
 
     public KeyStoreProviderImpl() {
@@ -143,8 +156,6 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         // FIPS-approved symmetric algorithms
         return upper.equals("AES")
                 || upper.startsWith("AES/")
-                || upper.equals("DESEDE")
-                || upper.equals("3DES")
                 || upper.equals("HMACSHA256")
                 || upper.equals("HMACSHA384")
                 || upper.equals("HMACSHA512")
@@ -316,25 +327,8 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      * @return {@code true} if the BCFIPS provider is registered after this call, {@code false} if it is not available
      */
     public static synchronized boolean ensureBcFipsProviderRegistered() {
-        if (Security.getProvider(BCFIPS_PROVIDER) != null) {
-            return true;
-        }
-        try {
-            Class<?> providerClass = Class.forName(BCFIPS_PROVIDER_CLASS);
-            java.security.Provider bcProvider = (java.security.Provider)
-                    providerClass.getDeclaredConstructor().newInstance();
-            Security.addProvider(bcProvider);
-            LOGGER.info("Successfully registered BouncyCastle FIPS provider");
-            return true;
-        } catch (ClassNotFoundException e) {
-            LOGGER.log(
-                    isFipsMode() ? Level.SEVERE : Level.FINE,
-                    "BouncyCastle FIPS provider not available in classpath. Ensure bc-fips dependency is included.");
-            return false;
-        } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Failed to register BouncyCastle FIPS provider: " + e.getMessage(), e);
-            return false;
-        }
+        // first in FIPS mode, appended otherwise; see FipsRuntime for why the position matters
+        return FipsRuntime.registerProvider();
     }
 
     private void ensureProviderAvailable(String keystoreType, String provider) {
@@ -545,6 +539,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      */
     @Override
     public synchronized void reloadKeyStore() throws IOException {
+        derivedKeys.clear();
         ks = null;
         keyStoreResource = null; // Clear cached resource to allow re-evaluation
         cachedKeyStoreType = getKeyStoreType(); // Re-evaluate FIPS mode
@@ -856,8 +851,9 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      */
     @Override
     public void setSecretKey(String alias, char[] key) throws IOException {
+        derivedKeys.clear();
         assertActivatedKeyStore();
-        SecretKey mySecretKey = deriveAesKey(toBytes(key));
+        SecretKey mySecretKey = toStoredSecretKey(key);
         KeyStore.SecretKeyEntry skEntry = new KeyStore.SecretKeyEntry(mySecretKey);
         char[] passwd = securityManager.getMasterPassword();
         try {
@@ -883,6 +879,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      */
     @Override
     public void removeKey(String alias) throws IOException {
+        derivedKeys.clear();
         assertActivatedKeyStore();
         try {
             ks.deleteEntry(alias);
@@ -912,18 +909,39 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     }
 
     /**
-     * Derives a 32-byte AES {@link SecretKey} from raw key material using SHA-256.
-     *
-     * @throws IllegalStateException if SHA-256 is not available (required by the JVM specification)
+     * The stored form of a generated secret: its raw bytes under the {@link #LEGACY_SECRET_KEY_ALGORITHM} label, the
+     * one label both JCEKS and BCFKS accept for a key of any length. This is exactly how GeoServer upstream stores
+     * them, so a data directory moves between the two without re-keying. Earlier FIPS builds of this fork stored a
+     * SHA-256 digest of the secret as an AES key instead; those keys stay readable, see {@link #getDerivedKey}.
      */
-    private static SecretKey deriveAesKey(byte[] rawKeyBytes) {
+    private static SecretKey toStoredSecretKey(char[] secret) {
+        return new SecretKeySpec(toBytes(secret), LEGACY_SECRET_KEY_ALGORITHM);
+    }
+
+    @Override
+    public SecretKey getDerivedKey(String alias, Function<char[], SecretKey> derivation) throws IOException {
+        SecretKey cached = derivedKeys.get(alias);
+        if (cached != null) {
+            return cached;
+        }
+        SecretKey secret = getSecretKey(alias);
+        if (secret == null) {
+            throw new IOException("No key for alias " + alias + " in key store "
+                    + getResource().path());
+        }
+        byte[] encoded = secret.getEncoded();
+        // secrets stored as random password bytes are handed over as their characters, like upstream does; the AES
+        // keys earlier FIPS builds of this fork derived are binary, and go over as their Base64 form instead
+        char[] chars = DEFAULT_SECRET_KEY_ALGORITHM.equalsIgnoreCase(secret.getAlgorithm())
+                ? Base64.getEncoder().encodeToString(encoded).toCharArray()
+                : toChars(encoded);
         try {
-            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
-            byte[] keyBytes = digest.digest(rawKeyBytes);
-            return new SecretKeySpec(keyBytes, DEFAULT_SECRET_KEY_ALGORITHM);
-        } catch (java.security.NoSuchAlgorithmException e) {
-            throw new IllegalStateException(
-                    "SHA-256 is required for key derivation but is not available in this JVM", e);
+            SecretKey derived = derivation.apply(chars);
+            derivedKeys.put(alias, derived);
+            return derived;
+        } finally {
+            scramble(chars);
+            scramble(encoded);
         }
     }
 
@@ -933,7 +951,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         RandomPasswordProvider randPasswdProvider = getSecurityManager().getRandomPassworddProvider();
 
         char[] configKey = randPasswdProvider.getRandomPasswordWithDefaultLength();
-        SecretKey mySecretKey = deriveAesKey(toBytes(configKey));
+        SecretKey mySecretKey = toStoredSecretKey(configKey);
         KeyStore.SecretKeyEntry skEntry = new KeyStore.SecretKeyEntry(mySecretKey);
         char[] passwd = securityManager.getMasterPassword();
         try {

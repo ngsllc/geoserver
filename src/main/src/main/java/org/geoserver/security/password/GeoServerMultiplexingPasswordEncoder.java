@@ -45,10 +45,9 @@ public class GeoServerMultiplexingPasswordEncoder implements PasswordEncoder {
             if (StringUtils.hasLength(enc.getPrefix())) {
                 if (service != null) {
                     try {
-                        if (enc instanceof GeoServerPBEPasswordEncoder) {
-                            if (!secMgr.getKeyStoreProvider().hasUserGroupKey(service.getName())) {
-                                continue; //   cannot use pbe encoder, no key
-                            }
+                        if (enc.getEncodingType() == PasswordEncodingType.ENCRYPT
+                                && !secMgr.getKeyStoreProvider().hasUserGroupKey(service.getName())) {
+                            continue; // reversible encoders (crypt1, crypt2, crypt3) need the service key
                         }
                         enc.initializeFor(service);
                     } catch (IOException e) {

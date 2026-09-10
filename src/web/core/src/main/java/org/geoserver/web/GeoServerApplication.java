@@ -233,13 +233,12 @@ public class GeoServerApplication extends WebApplication
     @SuppressWarnings("deprecation")
     @Override
     protected void init() {
-        // In Wicket 9.21.0, SecuritySettings constructor eagerly creates DefaultSecureRandomSupplier
-        // which uses SHA1PRNG — not available in FIPS mode. We use Unsafe to bypass the constructor
-        // and set a FIPS-compatible random supplier only when FIPS is active.
-        // TODO: Remove this workaround when upgrading to Wicket 9.23.0+ which includes fix for WICKET-7174
-        if (org.geoserver.security.KeyStoreProviderImpl.isFipsMode()) {
-            setSecuritySettings(FipsSecuritySettings.createForFipsMode());
-        }
+        // Wicket's default random supplier asks for SHA1PRNG by name, which no FIPS provider offers; draw from the
+        // validated module's DRBG in FIPS mode and the JVM default otherwise. Since Wicket 9.23.0 (WICKET-7174) the
+        // settings can be created before this is set, so no constructor workaround is needed any more.
+        getSecuritySettings().setRandomSupplier(new FipsSecureRandomSupplier());
+        // URL parameter encryption (when enabled) with AES per session instead of Wicket's PBEWithMD5AndDES
+        getSecuritySettings().setCryptFactory(new org.geoserver.web.wicket.KeyInSessionAesCryptFactory());
 
         // install webjars, eg. for wicketstuff select2
         WicketWebjars.install(this);
@@ -275,8 +274,6 @@ public class GeoServerApplication extends WebApplication
         getDebugSettings().setAjaxDebugModeEnabled(false);
         getJavaScriptLibrarySettings().setJQueryReference(JQueryResourceReference.INSTANCE_3);
         getApplicationSettings().setPageExpiredErrorPage(GeoServerExpiredPage.class);
-        // generates infinite redirections, commented out for the moment
-        // getSecuritySettings().setCryptFactory(GeoserverWicketEncrypterFactory.get());
 
         // theoretically, this replaces the old GeoServerRequestEncodingStrategy
         // by making the URLs encrypted at will

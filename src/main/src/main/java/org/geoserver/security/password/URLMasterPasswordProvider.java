@@ -20,9 +20,12 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.security.GeneralSecurityException;
+import java.util.Arrays;
 import java.util.List;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.crypto.SecretKey;
 import org.apache.commons.codec.binary.Base64;
 import org.apache.commons.io.IOUtils;
 import org.geoserver.config.util.XStreamPersister;
@@ -136,13 +139,53 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
         return encryptor;
     }
 
+    /**
+     * The current format, AES-GCM: a random 16 byte salt, then the IV and ciphertext from {@link AesGcmCipher}, as
+     * bytes. The key is derived from {@link #key()} with PBKDF2 and the salt, and cached per salt since derivation
+     * takes about 100ms. Same layout as GeoServer upstream's {@code AesGcmMasterPasswordProvider}.
+     */
     byte[] encode(char[] passwd) {
-
         if (!config.isEncrypting()) {
             return toBytes(passwd);
         }
+        byte[] salt = AesGcmCipher.randomBytes(AesGcmCipher.SALT_LENGTH);
+        byte[] plainText = toBytes(passwd);
+        try {
+            byte[] encrypted = AesGcmCipher.encrypt(gcmKey(salt), plainText);
+            byte[] result = new byte[salt.length + encrypted.length];
+            System.arraycopy(salt, 0, result, 0, salt.length);
+            System.arraycopy(encrypted, 0, result, salt.length, encrypted.length);
+            return result;
+        } finally {
+            scramble(plainText);
+        }
+    }
 
-        return encodeWithAlgorithm(passwd, FIPS_PBE_ALGORITHM);
+    private byte[] decodeGcm(byte[] stored) throws GeneralSecurityException {
+        if (stored.length <= AesGcmCipher.SALT_LENGTH + AesGcmCipher.IV_LENGTH) {
+            throw new GeneralSecurityException("Stored master password is too short for AES-GCM");
+        }
+        byte[] salt = Arrays.copyOfRange(stored, 0, AesGcmCipher.SALT_LENGTH);
+        return AesGcmCipher.decrypt(gcmKey(salt), Arrays.copyOfRange(stored, AesGcmCipher.SALT_LENGTH, stored.length));
+    }
+
+    private volatile DerivedKey derived;
+
+    private record DerivedKey(byte[] salt, SecretKey key) {}
+
+    private SecretKey gcmKey(byte[] salt) {
+        DerivedKey current = derived;
+        if (current != null && Arrays.equals(current.salt(), salt)) {
+            return current.key();
+        }
+        char[] password = key();
+        try {
+            SecretKey key = AesGcmCipher.deriveKey(password, salt);
+            derived = new DerivedKey(salt.clone(), key);
+            return key;
+        } finally {
+            scramble(password);
+        }
     }
 
     byte[] encodeWithAlgorithm(char[] passwd, String algorithm) {
@@ -161,29 +204,29 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
             return passwd;
         }
 
-        Exception failure = null;
+        Exception failure;
+        try {
+            return decodeGcm(passwd);
+        } catch (GeneralSecurityException | RuntimeException e) {
+            // not the current format, or not this key; the tag check makes a false match practically impossible
+            failure = e;
+        }
         for (String algorithm : KNOWN_PBE_ALGORITHMS) {
             byte[] decoded;
             try {
                 decoded = decodeWithAlgorithm(passwd, algorithm);
             } catch (Exception e) {
-                if (failure == null) {
-                    failure = e;
-                } else {
-                    failure.addSuppressed(e);
-                }
+                failure.addSuppressed(e);
                 continue;
             }
-            if (!FIPS_PBE_ALGORITHM.equals(algorithm)) {
-                // Readable, but not with the current algorithm: re-encrypt so the next read succeeds directly and
-                // the file can be read once legacy algorithms are blocked by an OS level FIPS policy
-                LOGGER.info("Master password was encrypted with " + algorithm + ", migrating to " + FIPS_PBE_ALGORITHM);
-                migrateToFipsAlgorithm(decoded);
-            }
+            // Readable, but in an earlier format: re-encrypt so the next read succeeds directly and the file stays
+            // readable once the legacy ciphers are gone, whether blocked by the OS or by approved-only mode
+            LOGGER.info("Master password was encrypted with " + algorithm + ", migrating to AES-GCM");
+            migrateToFipsAlgorithm(decoded);
             return decoded;
         }
 
-        String message = "Failed to decrypt master password with " + KNOWN_PBE_ALGORITHMS + ". ";
+        String message = "Failed to decrypt master password with AES-GCM or " + KNOWN_PBE_ALGORITHMS + ". ";
         if (KeyStoreProviderImpl.isFipsMode()) {
             message += "The password may have been encrypted with the legacy PBEWithMD5AndDES algorithm, which is "
                     + "blocked on FIPS enabled operating systems. Start GeoServer once with FIPS_MODE=true on a host "
@@ -195,12 +238,18 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
         throw new RuntimeException(message, failure);
     }
 
-    private byte[] decodeWithAlgorithm(byte[] passwd, String algorithm) {
-        StandardPBEByteEncryptor encryptor = newEncryptor(algorithm);
+    private byte[] decodeWithAlgorithm(byte[] passwd, String algorithm) throws Exception {
         char[] key = key();
         try {
+            byte[] stored = Base64.decodeBase64(passwd);
+            if (FIPS_PBE_ALGORITHM.equals(algorithm)) {
+                // written by earlier FIPS builds, with an IV generator; read without asking any provider for the
+                // (non-approved) cipher, so this works in approved-only mode too
+                return Pkcs12Pbe.decrypt(key, stored, 256, true);
+            }
+            StandardPBEByteEncryptor encryptor = newEncryptor(algorithm);
             encryptor.setPasswordCharArray(key);
-            return encryptor.decrypt(Base64.decodeBase64(passwd));
+            return encryptor.decrypt(stored);
         } finally {
             scramble(key);
         }
@@ -208,7 +257,7 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
 
     private void migrateToFipsAlgorithm(byte[] decryptedPassword) {
         // Work on a copy so the caller's array is not zeroed
-        byte[] copy = java.util.Arrays.copyOf(decryptedPassword, decryptedPassword.length);
+        byte[] copy = Arrays.copyOf(decryptedPassword, decryptedPassword.length);
         File tmpFile = null;
         try {
             Resource configDir = getConfigDir();
@@ -265,15 +314,15 @@ public final class URLMasterPasswordProvider extends MasterPasswordProvider {
                     java.nio.file.StandardCopyOption.ATOMIC_MOVE);
             tmpFile = null;
 
-            LOGGER.info("Successfully migrated master password to " + FIPS_PBE_ALGORITHM);
+            LOGGER.info("Successfully migrated master password to AES-GCM");
         } catch (java.nio.file.AtomicMoveNotSupportedException amEx) {
             LOGGER.warning("Atomic rename not supported on this filesystem. "
                     + "Master password migration skipped — re-save via admin UI to upgrade.");
         } catch (Exception e) {
-            LOGGER.log(Level.WARNING, "Failed to migrate master password to " + FIPS_PBE_ALGORITHM + ": " + e, e);
+            LOGGER.log(Level.WARNING, "Failed to migrate master password to AES-GCM: " + e, e);
             // Don't throw — we successfully decoded, migration is best-effort
         } finally {
-            java.util.Arrays.fill(copy, (byte) 0);
+            Arrays.fill(copy, (byte) 0);
             if (tmpFile != null && tmpFile.exists() && !tmpFile.delete()) {
                 LOGGER.warning("Could not delete temporary master password file " + tmpFile.getPath());
             }

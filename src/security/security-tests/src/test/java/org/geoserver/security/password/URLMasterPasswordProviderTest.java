@@ -57,6 +57,25 @@ public class URLMasterPasswordProviderTest extends GeoServerSecurityTestSupport 
         assertMigratedFrom(URLMasterPasswordProvider.PREVIOUS_FIPS_PBE_ALGORITHM);
     }
 
+    @Test
+    public void testEarlierFipsFileIsMigrated() throws Exception {
+        // written by the earlier FIPS builds with the BC-FIPS PKCS#12 cipher, read back through Pkcs12Pbe
+        assertMigratedFrom(URLMasterPasswordProvider.FIPS_PBE_ALGORITHM);
+    }
+
+    @Test
+    public void testCurrentFormatIsAesGcm() throws Exception {
+        File tmp = newPasswordFile();
+        URLMasterPasswordProvider mpp = newProvider(tmp);
+        mpp.doSetMasterPassword("geoserver".toCharArray());
+        byte[] stored = Files.readAllBytes(tmp.toPath());
+        byte[] salt = java.util.Arrays.copyOfRange(stored, 0, AesGcmCipher.SALT_LENGTH);
+        javax.crypto.SecretKey key = AesGcmCipher.deriveKey(mpp.key(), salt);
+        byte[] plain = AesGcmCipher.decrypt(
+                key, java.util.Arrays.copyOfRange(stored, AesGcmCipher.SALT_LENGTH, stored.length));
+        assertArrayEquals("geoserver".getBytes(StandardCharsets.UTF_8), plain);
+    }
+
     /**
      * Writes a master password file with the given (non current) algorithm, reads it back and checks the provider both
      * returned the right password and re-encrypted the file with the current algorithm.

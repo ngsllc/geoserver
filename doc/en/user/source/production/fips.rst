@@ -12,10 +12,19 @@ Overview
 
 FIPS (Federal Information Processing Standards) 140-3 is a U.S. government computer security standard that specifies requirements for cryptographic modules. GeoServer's FIPS implementation provides:
 
-* **BCFKS Keystore Support**: BouncyCastle FIPS KeyStore format for secure key storage
-* **FIPS-Compliant Algorithms**: Cryptographic algorithms that meet FIPS 140-3 requirements
-* **Backward Compatibility**: Automatic migration between JCEKS and BCFKS keystores
-* **Environment Configuration**: Flexible deployment through environment variables
+* **Validated module first**: the BouncyCastle FIPS provider is registered ahead of the JDK providers, so every
+  algorithm it offers, random number generation included, runs inside the validated module
+* **Approved-only enforcement**: BouncyCastle's approved-only mode is on, so a request for a non-approved
+  algorithm fails instead of running quietly
+* **Approved algorithms only**: passwords are protected with AES-256-GCM under keys derived with
+  PBKDF2-HMAC-SHA256 (the ``crypt3:`` encoder), the master password file with the same, secrets are kept in a
+  BCFKS keystore
+* **Migration in one start**: an existing data directory (JCEKS keystore, MD5/DES master password file,
+  ``crypt1:``/``crypt2:`` passwords) is converted on the first start in FIPS mode, without leaving approved-only
+  mode
+* **Compatible with GeoServer upstream**: the ``crypt3:`` format, the master password file layout and the way
+  secrets are stored in the keystore are those of GeoServer's own FIPS module, so data directories move between the
+  two
 
 Enabling FIPS Mode
 ------------------
@@ -37,13 +46,53 @@ Set the FIPS_MODE environment variable before starting GeoServer:
    java -DFIPS_MODE=true -jar geoserver.war
 
 When ``FIPS_MODE=true``, GeoServer automatically:
-- Uses BCFKS keystore format (FIPS-compliant)
-- Registers BouncyCastle FIPS provider (BCFIPS)
-- Enforces FIPS-approved cryptographic algorithms
+
+- requests BouncyCastle approved-only mode and registers the BouncyCastle FIPS provider (BCFIPS) first, before any
+  other code can ask for a cipher or a random number generator
+- uses the BCFKS keystore format
+- writes passwords with the AES-GCM ``crypt3:`` encoder and the master password file with AES-GCM
+- converts an existing data directory to those formats on the first start (see :ref:`fips_approved_only` and
+  :ref:`fips_password_migration`)
 
 When ``FIPS_MODE=false`` or unset, GeoServer uses:
+
 - JCEKS keystore format (traditional Java keystore)
-- Standard Java cryptographic providers
+- the standard Java cryptographic providers; BCFIPS is appended with the lowest priority, so it only serves the
+  algorithms no JDK provider offers
+- the same password encoders as GeoServer upstream: ``crypt1:`` (weak, default for new user group services),
+  ``crypt2:`` (strong) and ``crypt3:`` (AES-GCM, available but not the default)
+
+.. _fips_approved_only:
+
+Approved-only mode
+~~~~~~~~~~~~~~~~~~
+
+FIPS mode turns on BouncyCastle's approved-only mode for the whole JVM. In that mode the validated module refuses to
+run any algorithm that is not FIPS approved: the request fails with an exception instead of quietly producing a
+result. Without it the module still runs, but nothing stops non-approved cryptography, and the deployment is not
+FIPS compliant.
+
+BouncyCastle reads the switch (the ``org.bouncycastle.fips.approved_only`` system property) once, when its provider
+class initializes, and applies it to every thread. GeoServer sets the property during servlet context startup, before
+it loads the provider, and then verifies the mode actually took effect. If something else in the JVM initialized the
+provider earlier (a servlet container configured to use BCFIPS for TLS, another web application), the check fails and
+GeoServer refuses to start, telling you to set the property on the JVM command line instead:
+
+.. code-block:: bash
+
+   java -Dorg.bouncycastle.fips.approved_only=true -DFIPS_MODE=true -jar geoserver.war
+
+Setting it on the command line is the safest choice in any case. Setting ``GEOSERVER_FIPS_APPROVED_ONLY=false`` (or
+``-Dgeoserver.fips.approvedOnly=false``) keeps FIPS mode but leaves approved-only mode off; GeoServer logs a warning
+and the status page says so. Use it only to diagnose a problem, never for a compliant deployment.
+
+Two things a FIPS deployment should know about approved-only mode:
+
+* HTTP Digest authentication uses MD5 by design (RFC 7616). BCFIPS does not offer MD5 in approved-only mode, so the
+  request falls through to the JDK provider, which an operating system in FIPS mode blocks. Do not enable digest
+  authentication in a FIPS deployment.
+* PBKDF2 from a password shorter than 14 characters is refused. GeoServer's own secrets are random passwords of 32
+  characters and more, so this only matters to code that derives keys from user supplied passwords.
 
 
 Docker Container
@@ -190,24 +239,44 @@ Check that FIPS mode is active by examining the GeoServer logs:
 
 .. code-block:: text
 
-   INFO [geoserver.security] - Successfully registered BouncyCastle FIPS provider
+   INFO [geoserver.security] - Registered BouncyCastle FIPS provider at position 1
+   INFO [geoserver.security] - FIPS mode: BouncyCastle approved-only mode is on, non-approved algorithms will fail
    INFO [geoserver.security] - Keystore migration completed: JCEKS -> BCFKS
 
-The second line only appears the first time an existing JCEKS keystore is migrated. The Modules tab of the
-Server Status page also reports the FIPS mode and keystore type in use.
+The last line only appears the first time an existing JCEKS keystore is migrated. The Modules tab of the Server
+Status page reports what is actually in force, read live from the JVM rather than from configuration:
+
+.. code-block:: text
+
+   FIPS mode: ENABLED
+   Approved-only mode: requested, in force on this thread
+   Operating system FIPS mode: yes
+   Crypto provider: first
+   Random source: DEFAULT (BCFIPS)
+   Keystore type: BCFKS
+
+Anything other than ``first`` for the provider means another provider answers first and does the work outside the
+validated module; a random source other than ``BCFIPS`` means random bytes come from outside it; ``NOT in force on
+this thread`` means approved-only mode did not take effect, see :ref:`fips_approved_only`.
 
 **Important**: For complete FIPS compliance, ensure that the operating system is also configured for FIPS mode. GeoServer's FIPS implementation works in conjunction with OS-level FIPS settings to provide comprehensive security compliance.
 
 Environment Variable Reference
 ------------------------------
 
-+------------------------+-------------+-------------------------------------------+
-| Variable               | Default     | Description                               |
-+========================+=============+===========================================+
-| FIPS_MODE              | false       | Enable FIPS mode (true/false)             |
-|                        |             | - true: Uses BCFKS keystore with BCFIPS   |
-|                        |             | - false: Uses JCEKS keystore with SunJCE  |
-+------------------------+-------------+-------------------------------------------+
++-----------------------------+-------------+--------------------------------------------------------------+
+| Variable                    | Default     | Description                                                  |
++=============================+=============+==============================================================+
+| FIPS_MODE                   | false       | Enable FIPS mode (true/false)                                |
+|                             |             | - true: BCFIPS first, approved-only mode, BCFKS, AES-GCM    |
+|                             |             | - false: JDK providers, JCEKS, upstream password encoders   |
++-----------------------------+-------------+--------------------------------------------------------------+
+| GEOSERVER_FIPS_APPROVED_ONLY| true        | In FIPS mode, whether BouncyCastle approved-only mode is     |
+|                             |             | requested. ``false`` runs FIPS mode without enforcement,     |
+|                             |             | which is not a compliant deployment                          |
++-----------------------------+-------------+--------------------------------------------------------------+
+
+Both can also be given as system properties (``-DFIPS_MODE=true``, ``-Dgeoserver.fips.approvedOnly=false``).
 
 Implementation Details
 ----------------------
@@ -215,20 +284,39 @@ Implementation Details
 Provider Registration
 ~~~~~~~~~~~~~~~~~~~~~
 
-The BouncyCastle FIPS provider (``BCFIPS``) is registered on demand by ``KeyStoreProviderImpl`` the first time
-it is needed, in both FIPS and non-FIPS mode:
+Java hands each algorithm to the first registered provider that offers it, so the position of the BouncyCastle FIPS
+provider (``BCFIPS``) decides where cryptography actually runs:
 
-* **BCFKS keystore**: FIPS mode only
-* **Strong password encoder** (``crypt2:``), **master password file** and **URL parameter encryption**: both
-  modes. They use ``PBEWITHSHA256AND256BITAES-BC``, which only BCFIPS provides.
+* **FIPS mode**: ``FipsRuntime.initialize()`` inserts BCFIPS at position 1 during servlet context startup, after
+  requesting approved-only mode and before anything asks for a cipher or a ``SecureRandom``. Every algorithm the
+  module offers (AES, GCM, PBKDF2, SHA-2, the DRBG behind ``new SecureRandom()``) then runs inside it.
+* **Non-FIPS mode**: BCFIPS is appended with the lowest priority the first time something needs it, so algorithm
+  names the JDK also provides keep resolving to the JDK providers, as in GeoServer upstream.
 
-The provider is appended with the lowest priority, so algorithm names the JDK also provides keep resolving to
-the JDK providers. Because registration happens on demand, no ``java.security`` changes are needed, but the
-``bc-fips`` and ``bcpkix-fips`` JARs must be on the classpath even when FIPS mode is off.
+No ``java.security`` changes are needed, but the ``bc-fips`` and ``bcpkix-fips`` JARs must be on the classpath in
+both modes.
 
-The algorithm and provider used by the strong password encoder can be overridden with the system properties
-``geoserver.encryption.algorithm`` and ``geoserver.encryption.provider``. The master password file and URL
-parameter encryption always use the built-in algorithm.
+Password encoders and formats
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+* ``crypt3:`` (``aesGcmPasswordEncoder``): AES-256-GCM under a key derived from the keystore secret with
+  PBKDF2-HMAC-SHA256 (600,000 iterations, cached). Approved, authenticated (a changed value is detected rather than
+  decoded into garbage), and byte for byte the format of GeoServer upstream's encoder of the same name. The only
+  encoder that writes in FIPS mode, and the default there for configuration passwords and new user group services.
+* ``crypt2:`` (``strongPbePasswordEncoder``): PKCS#12 key derivation with SHA-256 and AES-256-CBC, the strong encoder
+  of GeoServer upstream and of earlier FIPS builds. Not approved. In FIPS mode it is read only: existing values are
+  decrypted with a built-in implementation of the scheme that needs nothing but SHA-256 and AES/CBC, so they stay
+  readable in approved-only mode and get re-encrypted as ``crypt3:`` on the first start.
+* ``crypt1:`` (``pbePasswordEncoder``): MD5/DES, the weak encoder. Not approved. In FIPS mode it is read only, and
+  only where the JVM still offers the cipher, which an operating system in FIPS mode does not.
+
+The master password file follows the same rule: written as AES-GCM (a 16 byte salt, then IV and ciphertext), read in
+every format an earlier GeoServer used (``PBEWITHSHA256AND256BITAES-BC``, ``PBEWithHmacSHA256AndAES_128``,
+``PBEWithMD5AndDES``) and re-encrypted on first use, keeping a ``.backup`` copy.
+
+Secrets in the keystore are stored as the raw bytes of a random 40 character password, labelled ``HmacSHA256`` (the
+one label both JCEKS and BCFKS accept for a key of any length), exactly as GeoServer upstream stores them. Keys
+created by earlier FIPS builds, which stored a SHA-256 digest of the secret as an AES key, stay readable.
 
 FIPS Detection Priority
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -306,11 +394,20 @@ The short version:
 Security Considerations
 -----------------------
 
-* **Key Management**: BCFKS provides enhanced key protection compared to JCEKS
-* **Algorithm Compliance**: FIPS mode ensures only approved cryptographic algorithms are used
-* **Audit Requirements**: FIPS compliance may be required for government and enterprise deployments
-* **Performance Impact**: FIPS-compliant algorithms may have slightly different performance characteristics
-* **OS-Level FIPS**: For complete compliance, the operating system must also be configured for FIPS mode
+* **Enforcement**: with approved-only mode on, the validated module refuses non-approved algorithms. This is what
+  makes the compliance claim checkable; the status page shows whether it is in force. Without it (``FIPS_MODE`` with
+  ``GEOSERVER_FIPS_APPROVED_ONLY=false``) nothing prevents non-approved cryptography.
+* **Provider position**: only algorithms served by BCFIPS run inside the validated module. Keep it first; the status
+  page reports ``behind <name>`` when it is not.
+* **Key Management**: secrets live in a BCFKS keystore protected by the master password; the master password file
+  is protected with AES-GCM under a key derived from a built-in constant, that is, obfuscated rather than secret,
+  as in every GeoServer. Protect the file with file system permissions.
+* **Reversible passwords**: configuration passwords and, by default, user group service passwords are encrypted
+  reversibly (``crypt3:``), so a keystore compromise exposes them. Use the ``digest1:`` encoder for user group
+  services where reversibility is not needed, as GeoServer upstream recommends.
+* **HTTP Digest authentication** relies on MD5 and cannot be made approved; do not enable it.
+* **OS-Level FIPS**: for a compliant deployment the operating system must also be in FIPS mode, so that the JDK's
+  own providers are restricted as well. GeoServer detects it and treats ``FIPS_MODE=false`` as an error to ignore.
 
 Troubleshooting
 ---------------

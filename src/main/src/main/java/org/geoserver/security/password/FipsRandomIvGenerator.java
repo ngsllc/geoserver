@@ -26,8 +26,8 @@ public class FipsRandomIvGenerator implements IvGenerator {
 
     /** Creates a new instance using the system default SecureRandom. */
     public FipsRandomIvGenerator() {
-        // Use the default SecureRandom, which in FIPS mode will use a FIPS-approved algorithm
-        this.random = new SecureRandom();
+        // the BCFIPS DRBG in FIPS mode, regardless of provider order; the JVM default otherwise
+        this.random = org.geoserver.security.FipsRuntime.secureRandom();
     }
 
     /**

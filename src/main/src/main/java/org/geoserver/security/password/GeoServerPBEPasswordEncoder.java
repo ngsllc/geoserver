@@ -10,29 +10,39 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 import static org.geoserver.security.SecurityUtils.toChars;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
+import java.security.MessageDigest;
 import java.security.Provider;
 import java.security.Security;
-import java.util.Arrays;
 import java.util.Base64;
 import java.util.Set;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
+import org.geoserver.security.FipsRuntime;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geoserver.security.KeyStoreProvider;
 import org.geoserver.security.KeyStoreProviderImpl;
 import org.jasypt.encryption.pbe.StandardPBEByteEncryptor;
 import org.jasypt.encryption.pbe.StandardPBEStringEncryptor;
+import org.jasypt.exceptions.EncryptionOperationNotPossibleException;
 import org.jasypt.iv.NoIvGenerator;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
- * Password Encoder using symmetric encryption
+ * Password encoder using password based symmetric encryption ({@code crypt1:} with MD5/DES, {@code crypt2:} with
+ * PKCS#12 SHA-256/AES).
+ *
+ * <p>None of these ciphers is FIPS approved. In FIPS mode this encoder therefore only <em>reads</em>, so that a data
+ * directory written by an earlier version can be migrated to the AES-GCM {@link GeoServerAesGcmPasswordEncoder}
+ * ({@code crypt3:}); writing throws. The PKCS#12 values are read with {@link Pkcs12Pbe}, which needs nothing but
+ * SHA-256 and AES/CBC and so works in BouncyCastle's approved-only mode; the MD5/DES values can only be read where the
+ * JVM still offers that cipher, which an operating system in FIPS mode does not.
  *
  * <p>The salt parameter is not used, this implementation computes a random salt as default.
- *
- * <p>{@link #isPasswordValid(String, String, Object)} {@link #encodePassword(String, Object)}
  *
  * @author christian
  */
@@ -40,7 +50,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
 
     private static final Logger LOGGER = Logger.getLogger(GeoServerPBEPasswordEncoder.class.getName());
 
-    /** Algorithms that are NOT FIPS-compliant and cannot be used when FIPS mode is enabled */
+    /** Algorithms that are NOT FIPS-compliant and that a FIPS enabled operating system blocks entirely */
     private static final Set<String> NON_FIPS_ALGORITHMS =
             Set.of("PBEWITHMD5ANDDES", "PBEWITHMD5ANDTRIPLEDES", "PBEWITHSHA1ANDDES", "PBEWITHSHA1ANDDESEDE");
 
@@ -52,10 +62,17 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
 
     private KeyStoreProvider keystoreProvider;
 
+    /**
+     * Read once, on first use, and kept for the life of this (prototype scoped) encoder. Jasypt copies the password
+     * into its own encryptor anyway, so scrambling it here would not shorten how long it stays on the heap, and the
+     * PKCS#12 reader needs the characters for every value it decrypts.
+     */
+    private volatile KeyMaterial keyMaterial;
+
     @Override
     public void initialize(GeoServerSecurityManager securityManager) throws IOException {
         this.keystoreProvider = securityManager.getKeyStoreProvider();
-        if (KeyStoreProviderImpl.isFipsMode() && !isAvailableInFipsMode()) {
+        if (FipsRuntime.isFipsMode() && !isAvailableInFipsMode()) {
             throw new IOException("Algorithm '" + algorithm + "' not available in FIPS mode");
         }
     }
@@ -93,93 +110,187 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
     }
 
     /**
-     * Whether this encoder can be used in FIPS mode. The weak encoder is based on MD5 and DES, which FIPS enabled
-     * operating systems block entirely, so it cannot be used to encrypt or decrypt anything in FIPS mode.
+     * Whether values written with this encoder can be read in FIPS mode. The PKCS#12 ciphers always can, through
+     * {@link Pkcs12Pbe}; the MD5/DES ciphers only where the JVM still offers them, so that a data directory created by
+     * an earlier GeoServer can be migrated on a host whose operating system is not (yet) in FIPS mode.
+     *
+     * <p>Writing is never available in FIPS mode, see {@link #assertWritable()}.
      */
     public boolean isAvailableInFipsMode() {
-        return algorithm == null || !NON_FIPS_ALGORITHMS.contains(algorithm.toUpperCase());
+        if (algorithm == null || Pkcs12Pbe.keyBits(algorithm) > 0) {
+            return true;
+        }
+        if (!NON_FIPS_ALGORITHMS.contains(algorithm.toUpperCase())) {
+            return true;
+        }
+        try {
+            Cipher.getInstance(algorithm);
+            return true;
+        } catch (GeneralSecurityException e) {
+            return false;
+        }
+    }
+
+    /** In FIPS mode this encoder is read only: the AES-GCM encoder writes. */
+    private void assertWritable() {
+        if (FipsRuntime.isFipsMode()) {
+            throw new IllegalStateException("The '" + getName() + "' (" + getPrefix() + ":) password encoder uses "
+                    + algorithm + ", which is not FIPS approved; in FIPS mode passwords are written with the "
+                    + "aesGcmPasswordEncoder (crypt3:) encoder");
+        }
     }
 
     @Override
     protected PasswordEncoder createStringEncoder() {
-        KeyMaterial key = lookupKeyMaterial();
-        try {
-            stringEncrypter = new StandardPBEStringEncryptor();
-            stringEncrypter.setPasswordCharArray(key.password);
-            // FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
-            stringEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
-            stringEncrypter.setIvGenerator(key.legacy ? new NoIvGenerator() : new FipsRandomIvGenerator());
+        return new PasswordEncoder() {
+            @Override
+            public String encode(CharSequence rawPassword) {
+                if (rawPassword == null) {
+                    return null;
+                }
+                assertWritable();
+                return stringEncrypter().encrypt(rawPassword.toString());
+            }
 
-            ensureProviderAvailableIfRequested();
-            if (getProviderName() != null && !getProviderName().isEmpty())
-                stringEncrypter.setProviderName(getProviderName());
-            stringEncrypter.setAlgorithm(getAlgorithm());
-
-            JasyptPBEPasswordEncoderWrapper encoder = new JasyptPBEPasswordEncoderWrapper();
-            encoder.setPbeStringEncryptor(stringEncrypter);
-
-            return encoder;
-        } finally {
-            key.dispose();
-        }
+            @Override
+            public boolean matches(CharSequence rawPassword, String encodedPassword) {
+                if (rawPassword == null || encodedPassword == null) {
+                    return false;
+                }
+                byte[] decrypted = tryDecrypt(encodedPassword);
+                if (decrypted == null) {
+                    return false;
+                }
+                byte[] raw = rawPassword.toString().getBytes(StandardCharsets.UTF_8);
+                try {
+                    return MessageDigest.isEqual(decrypted, raw);
+                } finally {
+                    scramble(decrypted);
+                    scramble(raw);
+                }
+            }
+        };
     }
 
     @Override
     protected CharArrayPasswordEncoder createCharEncoder() {
-        KeyMaterial key = lookupKeyMaterial();
+        return new CharArrayPasswordEncoder() {
+            @Override
+            public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
+                if (encPass == null || rawPass == null) {
+                    return false;
+                }
+                byte[] decrypted = tryDecrypt(encPass);
+                if (decrypted == null) {
+                    return false;
+                }
+                byte[] raw = toBytes(rawPass);
+                try {
+                    return MessageDigest.isEqual(decrypted, raw);
+                } finally {
+                    scramble(decrypted);
+                    scramble(raw);
+                }
+            }
+
+            @Override
+            public String encodePassword(char[] rawPass, Object salt) {
+                if (rawPass == null) {
+                    return null;
+                }
+                assertWritable();
+                byte[] bytes = toBytes(rawPass);
+                try {
+                    return new String(Base64.getEncoder().encode(byteEncrypter().encrypt(bytes)));
+                } finally {
+                    scramble(bytes);
+                }
+            }
+        };
+    }
+
+    /**
+     * Decrypts a Base64 value written by this encoder. PKCS#12 values go through {@link Pkcs12Pbe}, so no password
+     * based cipher is ever asked of a provider; anything else (MD5/DES) goes through jasypt and the JDK.
+     */
+    private byte[] decryptBytes(String encPass) throws GeneralSecurityException {
+        byte[] bytes;
         try {
-            byteEncrypter = new StandardPBEByteEncryptor();
-            byteEncrypter.setPasswordCharArray(key.password);
-            // FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
-            byteEncrypter.setSaltGenerator(new FipsRandomSaltGenerator());
-            byteEncrypter.setIvGenerator(key.legacy ? new NoIvGenerator() : new FipsRandomIvGenerator());
-            ensureProviderAvailableIfRequested();
-            if (getProviderName() != null && !getProviderName().isEmpty())
-                byteEncrypter.setProviderName(getProviderName());
-            byteEncrypter.setAlgorithm(getAlgorithm());
-
-            // Return the encoder; the finally block below scrambles the key material.
-            // This is safe because Jasypt's setPasswordCharArray() copies the array internally.
-            return new CharArrayPasswordEncoder() {
-                @Override
-                public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
-                    byte[] decoded = Base64.getDecoder().decode(encPass.getBytes());
-                    byte[] decrypted = byteEncrypter.decrypt(decoded);
-
-                    char[] chars = toChars(decrypted);
-                    try {
-                        return Arrays.equals(chars, rawPass);
-                    } finally {
-                        scramble(decrypted);
-                        scramble(chars);
-                    }
-                }
-
-                @Override
-                public String encodePassword(char[] rawPass, Object salt) {
-                    byte[] bytes = toBytes(rawPass);
-                    try {
-                        return new String(Base64.getEncoder().encode(byteEncrypter.encrypt(bytes)));
-                    } finally {
-                        scramble(bytes);
-                    }
-                }
-            };
-        } finally {
-            key.dispose();
+            bytes = Base64.getDecoder().decode(encPass);
+        } catch (IllegalArgumentException e) {
+            throw new GeneralSecurityException("Encoded password is not valid Base64", e);
         }
+        int pkcs12Bits = Pkcs12Pbe.keyBits(getAlgorithm());
+        if (pkcs12Bits > 0) {
+            KeyMaterial key = keyMaterial();
+            // keys created with FIPS support wrote an IV generator's bytes into the value, legacy keys did not
+            return Pkcs12Pbe.decrypt(key.password, bytes, pkcs12Bits, !key.legacy);
+        }
+        try {
+            return byteEncrypter().decrypt(bytes);
+        } catch (EncryptionOperationNotPossibleException e) {
+            throw new GeneralSecurityException("Encoded password cannot be decrypted", e);
+        }
+    }
+
+    /** Decrypts, or returns null when the value is not a valid encryption under this encoder's key. */
+    private byte[] tryDecrypt(String encPass) {
+        try {
+            return decryptBytes(encPass);
+        } catch (GeneralSecurityException | RuntimeException e) {
+            LOGGER.log(Level.FINE, "Encoded password does not decrypt under alias " + keyAliasInKeyStore, e);
+            return null;
+        }
+    }
+
+    /** The jasypt string encryptor, built on first use so that FIPS mode never asks the provider for the cipher. */
+    private synchronized StandardPBEStringEncryptor stringEncrypter() {
+        if (stringEncrypter == null) {
+            KeyMaterial key = keyMaterial();
+            StandardPBEStringEncryptor encrypter = new StandardPBEStringEncryptor();
+            encrypter.setPasswordCharArray(key.password);
+            // FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+            encrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+            encrypter.setIvGenerator(key.legacy ? new NoIvGenerator() : new FipsRandomIvGenerator());
+            ensureProviderAvailableIfRequested();
+            if (getProviderName() != null && !getProviderName().isEmpty()) {
+                encrypter.setProviderName(getProviderName());
+            }
+            encrypter.setAlgorithm(getAlgorithm());
+            stringEncrypter = encrypter;
+        }
+        return stringEncrypter;
+    }
+
+    /** The jasypt byte encryptor, built on first use so that FIPS mode never asks the provider for the cipher. */
+    private synchronized StandardPBEByteEncryptor byteEncrypter() {
+        if (byteEncrypter == null) {
+            KeyMaterial key = keyMaterial();
+            StandardPBEByteEncryptor encrypter = new StandardPBEByteEncryptor();
+            encrypter.setPasswordCharArray(key.password);
+            // FIPS-compatible generators instead of Jasypt's defaults which use SHA1PRNG
+            encrypter.setSaltGenerator(new FipsRandomSaltGenerator());
+            encrypter.setIvGenerator(key.legacy ? new NoIvGenerator() : new FipsRandomIvGenerator());
+            ensureProviderAvailableIfRequested();
+            if (getProviderName() != null && !getProviderName().isEmpty()) {
+                encrypter.setProviderName(getProviderName());
+            }
+            encrypter.setAlgorithm(getAlgorithm());
+            byteEncrypter = encrypter;
+        }
+        return byteEncrypter;
     }
 
     /**
      * The Jasypt password derived from the keystore key backing this encoder, and the on-disk format that goes with it.
      *
-     * <p>Two generations of keys exist. Keys created by GeoServer before FIPS support are the raw bytes of a random
-     * printable password stored as a "PBE" key (relabelled {@link KeyStoreProviderImpl#LEGACY_SECRET_KEY_ALGORITHM} in
-     * a BCFKS keystore); values encrypted with them use those characters as the Jasypt password and the PKCS#12 derived
-     * IV, which are the Jasypt defaults. Keys created with FIPS support are 256 bit AES keys derived with SHA-256;
-     * values encrypted with them use the Base64 form of the key and an explicit random IV. The format is a property of
-     * the key rather than of the individual value, so every value under one key is written and read the same way and
-     * data directories coming from earlier GeoServer versions keep working.
+     * <p>Two generations of keys exist. Keys stored as the raw bytes of a random printable password (all keys created
+     * by GeoServer upstream and, since the AES-GCM encoder, by this fork) use those characters as the Jasypt password
+     * and the PKCS#12 derived IV, which are the Jasypt defaults. Keys created by earlier FIPS builds of this fork are
+     * 256 bit AES keys derived with SHA-256; values encrypted with them use the Base64 form of the key and carry an IV
+     * generator's bytes. The format is a property of the key rather than of the individual value, so every value under
+     * one key is written and read the same way and data directories coming from earlier GeoServer versions keep
+     * working.
      */
     static final class KeyMaterial {
         final char[] password;
@@ -189,15 +300,25 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
             this.password = password;
             this.legacy = legacy;
         }
-
-        void dispose() {
-            scramble(password);
-        }
     }
 
-    /** A key created with FIPS support is an AES key; anything else was created by an earlier GeoServer version. */
+    /** A key derived by an earlier FIPS build of this fork is an AES key; anything else is a stored random password. */
     static boolean isLegacyKey(SecretKey key) {
         return !KeyStoreProviderImpl.DEFAULT_SECRET_KEY_ALGORITHM.equalsIgnoreCase(key.getAlgorithm());
+    }
+
+    private KeyMaterial keyMaterial() {
+        KeyMaterial current = keyMaterial;
+        if (current == null) {
+            synchronized (this) {
+                current = keyMaterial;
+                if (current == null) {
+                    current = lookupKeyMaterial();
+                    keyMaterial = current;
+                }
+            }
+        }
+        return current;
     }
 
     KeyMaterial lookupKeyMaterial() {
@@ -247,16 +368,7 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
                 && KeyStoreProviderImpl.ensureBcFipsProviderRegistered()) {
             return;
         }
-        // In FIPS mode this is a real problem — the algorithm will likely fail downstream.
-        // In non-FIPS mode it's acceptable to fall back to default providers.
-        if (KeyStoreProviderImpl.isFipsMode()) {
-            LOGGER.log(
-                    Level.WARNING,
-                    "Failed to register requested security provider '" + requested
-                            + "' in FIPS mode. Encryption operations may fail.");
-        } else {
-            LOGGER.log(Level.FINE, "Provider '" + requested + "' not available, falling back to default JCA providers");
-        }
+        LOGGER.log(Level.FINE, "Provider '" + requested + "' not available, falling back to default JCA providers");
     }
 
     @Override
@@ -266,32 +378,40 @@ public class GeoServerPBEPasswordEncoder extends AbstractGeoserverPasswordEncode
 
     @Override
     public String decode(String encPass) throws UnsupportedOperationException {
-        if (stringEncrypter == null) {
-            // not initialized
-            getStringEncoder();
+        byte[] decrypted = decodeBytes(encPass);
+        try {
+            return new String(decrypted, StandardCharsets.UTF_8);
+        } finally {
+            scramble(decrypted);
         }
-
-        return stringEncrypter.decrypt(removePrefix(encPass));
     }
 
     @Override
     public char[] decodeToCharArray(String encPass) throws UnsupportedOperationException {
-        if (byteEncrypter == null) {
-            // not initialized
-            getCharEncoder();
-        }
-
-        byte[] decoded = Base64.getDecoder().decode(removePrefix(encPass).getBytes());
-        byte[] bytes = byteEncrypter.decrypt(decoded);
+        byte[] decrypted = decodeBytes(encPass);
         try {
-            return toChars(bytes);
+            return toChars(decrypted);
         } finally {
-            scramble(bytes);
+            scramble(decrypted);
+        }
+    }
+
+    private byte[] decodeBytes(String encPass) {
+        try {
+            return decryptBytes(removePrefix(encPass));
+        } catch (GeneralSecurityException e) {
+            throw new IllegalArgumentException(
+                    "Encoded password cannot be decrypted with the key for alias " + keyAliasInKeyStore, e);
         }
     }
 
     @Override
     public String encode(CharSequence rawPassword) {
-        return createCharEncoder().encodePassword(decodeToCharArray(rawPassword.toString()), null);
+        char[] plain = decodeToCharArray(rawPassword.toString());
+        try {
+            return createCharEncoder().encodePassword(plain, null);
+        } finally {
+            scramble(plain);
+        }
     }
 }

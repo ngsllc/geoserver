@@ -59,52 +59,84 @@ GeoServer includes BC-FIPS libraries by default. No special profiles are needed.
   2. System property ``FIPS_MODE``
   3. Environment variable ``FIPS_MODE``
 
-* ``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` registers the BCFIPS provider on demand; it is the
-  single registration point used by the keystore provider, ``GeoServerPBEPasswordEncoder``,
-  ``URLMasterPasswordProvider`` and ``GeoserverWicketEncrypterFactory``
+* ``FipsRuntime`` owns the process wide state: ``initialize()`` runs first in ``GeoserverInitStartupListener``,
+  requests approved-only mode, inserts BCFIPS at position 1 and verifies the mode took effect;
+  ``registerProvider()`` is the single registration point (first in FIPS mode, appended otherwise) and
+  ``secureRandom()`` the single random source (the BCFIPS DRBG in FIPS mode, asked for by name).
+  ``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` delegates to it
 * Automatic keystore type selection: BCFKS (FIPS) or JCEKS (non-FIPS)
 
-Password-Based Encryption Algorithms
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Approved-only mode
+^^^^^^^^^^^^^^^^^^
 
-All strong password-based encryption uses one algorithm, ``KeyStoreProviderImpl.FIPS_PBE_ALGORITHM``
-(``PBEWITHSHA256AND256BITAES-BC``: PKCS#12 key derivation with SHA-256, AES-256/CBC). BC-FIPS registers this
-name; the stock BouncyCastle name ``PBEWITHSHA256AND256BITAES-CBC-BC`` and the SunJCE PBES2 names do **not**
-exist in BC-FIPS, so never hardcode an algorithm string. Reference the constant and call
-``KeyStoreProviderImpl.ensureBcFipsProviderRegistered()`` before building a Jasypt encryptor for it, then pin
-the encryptor with ``setProviderName(KeyStoreProviderImpl.BCFIPS_PROVIDER)`` so the lookup does not depend on
-provider ordering. The constant is consumed by:
+Two facts about BC-FIPS decide the design, both verified against bc-fips 2.1.2 (``FipsApprovedOnlyTest`` pins the
+consequences):
 
-* ``applicationSecurityContext.xml`` as the default of the ``strongPbePasswordEncoder`` bean (overridable with
-  the ``geoserver.encryption.algorithm`` and ``geoserver.encryption.provider`` system properties)
-* ``URLMasterPasswordProvider`` for the encrypted master password file
-* ``GeoserverWicketEncrypterFactory`` for URL parameter encryption
+* ``org.bouncycastle.fips.approved_only`` is read once, when the provider class initializes, and applies to every
+  thread. Set later it reaches no thread at all. The per-thread ``CryptoServicesRegistrar.setApprovedOnlyMode`` is
+  not inherited by child threads and can never be undone. So the property has to be set before anything loads a
+  BouncyCastle class, which is what ``FipsRuntime.initialize()`` does, and migration of existing data has to work
+  *inside* approved-only mode.
+* In approved-only mode BC-FIPS offers no password based cipher at all (the whole ``PBEWITH*`` family is gone) and
+  refuses PBKDF2 from passwords under 112 bits.
 
-**Keystore keys and stored passwords.** Two generations of keystore keys exist. Keys created before FIPS
-support are the raw bytes of a 40 character random password stored as a ``PBE`` key; keys created with FIPS
-support are 256 bit AES keys derived with SHA-256 (``KeyStoreProviderImpl.deriveAesKey``). BCFKS rejects the
-``PBE`` label and enforces AES key sizes, so ``KeyStoreProviderImpl.toBcfksSecretKey`` relabels legacy keys as
-``HmacSHA256`` entries (``LEGACY_SECRET_KEY_ALGORITHM``) when a keystore is migrated or its master password is
-changed; the bytes are never altered. ``GeoServerPBEPasswordEncoder.isLegacyKey`` uses the label to pick the
-matching Jasypt setup (``KeyMaterial``): legacy keys use the key characters as password and the PKCS#12 derived
-IV, exactly like upstream GeoServer with stock BouncyCastle, so ``crypt1:``/``crypt2:`` values written by
-earlier versions decrypt unchanged; AES keys use the Base64 form of the key and an explicit random IV. The
-format is a property of the key, never of the individual value. ``LegacyPasswordCompatibilityTest`` and
-``FipsBootMigrationTest`` pin this behaviour with values encrypted by upstream 2.28 under the test keystore
-key (``LegacyPasswordFixtures``).
+Everything GeoServer writes therefore uses PBKDF2-HMAC-SHA256 and AES-GCM, and everything it needs to read from
+earlier versions is decrypted without asking a provider for a non-approved cipher.
 
-In FIPS mode ``GeoServerSecurityManager.ensureFipsCompatibleConfigPasswordEncoder`` runs before the security
-directory migrations and switches a configuration password encoder that reports
-``isAvailableInFipsMode() == false`` to the strong encoder, persisting ``config.xml``.
+Password encoders and formats
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-``URLMasterPasswordProvider.decode()`` tries the algorithms in ``KNOWN_PBE_ALGORITHMS`` in order: the current
-algorithm, ``PBEWithHmacSHA256AndAES_128`` (used by earlier FIPS builds) and the legacy ``PBEWithMD5AndDES``.
-A file readable only with one of the fallbacks is re-encrypted with the current algorithm through a temp
-file, a ``.backup`` copy and an atomic rename. The fallbacks are attempted in FIPS mode too, so that the
-documented migration (one start with ``FIPS_MODE=true`` on a host without OS-level FIPS) can read legacy
-files; on an OS with FIPS enforced the JVM rejects MD5/DES and the decode fails with a message pointing at the
-migration procedure. When adding a new algorithm, append the previous one to ``KNOWN_PBE_ALGORITHMS`` and add
-a ciphertext fixture to ``JasyptDecodeTest`` so existing data directories stay readable.
+**``crypt3:``, ``GeoServerAesGcmPasswordEncoder`` / ``AesGcmCipher``.** Key = PBKDF2-HMAC-SHA256(secret, salt =
+SHA-256(secret)[0..16], 600,000 iterations, 256 bit); value = Base64(IV(12) || AES-256-GCM ciphertext and tag). The
+salt is a digest of the secret because the secrets are unique 40 character random passwords and a random salt would
+have to be stored next to them; the class documents why this must never be used with a human chosen password. The
+derived key is cached in ``KeyStoreProviderImpl.getDerivedKey`` and dropped whenever the keystore changes. Parameters,
+layout and the bean name ``aesGcmPasswordEncoder`` are those of GeoServer upstream (geoserver/geoserver#9855);
+``AesGcmCipherTest`` holds a key and a ciphertext produced by upstream's implementation. ``matches`` and
+``isPasswordValid`` return ``false`` for a value that does not decrypt (corrupt, or another key) instead of throwing,
+and compare in constant time.
+
+**``crypt2:`` and ``crypt1:``, ``GeoServerPBEPasswordEncoder``.** Read only in FIPS mode; ``encodePassword`` throws
+an ``IllegalStateException`` naming ``crypt3``. ``crypt2:`` values (PKCS#12 SHA-256, AES-256-CBC; jasypt layout
+``salt(16) || [16 ignored bytes when the writer had an IV generator] || ciphertext``) are decrypted by
+``Pkcs12Pbe``, an implementation of RFC 7292 appendix B over ``MessageDigest`` SHA-256 and ``AES/CBC/PKCS5Padding``.
+It was validated against 400 values written by jasypt on BC-FIPS and against a value written by GeoServer upstream
+with stock BouncyCastle (``LegacyPasswordFixtures.CRYPT2``); ``Pkcs12PbeTest`` pins both layouts. ``crypt1:`` goes
+through jasypt and the JDK's ``PBEWithMD5AndDES``, which exists only where the operating system is not in FIPS mode.
+In non-FIPS mode both encoders still write, exactly like upstream.
+
+**Keystore secrets.** ``KeyStoreProviderImpl.setSecretKey`` and ``addInitialKeys`` store the raw bytes of the random
+password under the ``HmacSHA256`` label (``LEGACY_SECRET_KEY_ALGORITHM``), the one label JCEKS and BCFKS both accept
+for any length; this is how upstream stores them, so ``getDerivedKey`` hands the characters of those bytes to the
+derivation and the two produce the same ``crypt3`` keys. Keys created by earlier FIPS builds are SHA-256 derived AES
+keys; ``getDerivedKey`` hands those over as Base64 instead, and ``GeoServerPBEPasswordEncoder.isLegacyKey`` still
+selects the matching ``crypt2`` layout for them. Never alter key bytes.
+
+**Boot migration.** In FIPS mode ``GeoServerSecurityManager.reload()`` runs, in order:
+``ensureFipsCompatibleConfigPasswordEncoder`` (before ``init()``: a ``crypt1``/``crypt2`` configuration encoder is
+switched to ``aesGcmPasswordEncoder`` in ``config.xml``), then after ``init()``
+``updateConfigurationFilesWithEncryptedFields`` (re-encrypts store and security configuration passwords) and
+``ensureFipsCompatibleUserGroupEncoders`` (for every writable user group service on a PBE encoder: decode each user
+password with the old encoder, encode with ``crypt3``, ``updateUser``, ``store``, switch the service configuration;
+a read only service is reported). All of it runs in approved-only mode. ``FipsBootMigrationTest`` stages a legacy
+data directory, ``crypt2`` user passwords included, and checks every step.
+
+**Master password file, ``URLMasterPasswordProvider``.** Written as ``salt(16) || AesGcmCipher.encrypt(PBKDF2(key(),
+salt), password)``, the layout of upstream's ``AesGcmMasterPasswordProvider``; the derived key is cached per salt.
+``decode()`` tries AES-GCM first (the tag rules out a false match), then ``KNOWN_PBE_ALGORITHMS`` in order:
+``PBEWITHSHA256AND256BITAES-BC`` through ``Pkcs12Pbe``, then the SunJCE ``PBEWithHmacSHA256AndAES_128`` and
+``PBEWithMD5AndDES`` through jasypt. A file readable only through a fallback is re-encrypted through a temp file, a
+``.backup`` copy and an atomic rename. When adding a format, keep the previous reader and add a fixture to
+``JasyptDecodeTest`` or ``URLMasterPasswordProviderTest``.
+
+**URL parameter encryption.** ``GeoServerApplication`` installs ``KeyInSessionAesCryptFactory`` (a port of upstream's):
+an AES-256 key per session from ``KeyGenerator`` seeded by ``FipsRuntime.secureRandom()``, and ``AesCbcCrypt`` with an
+IV derived from the key. The IV is fixed per session on purpose, Wicket compares a re-rendered URL with the requested
+one and a random IV would send the browser in a redirect loop; the class documents what that costs.
+
+**Randomness.** ``FipsRandomSaltGenerator``, ``FipsRandomIvGenerator`` and Wicket's ``FipsSecureRandomSupplier`` all
+draw from ``FipsRuntime.secureRandom()``. Do not call ``new SecureRandom()`` in FIPS aware code: with the provider
+appended it comes from ``SUN``, which is exactly what the status page's ``Random source`` line exists to catch.
 
 Core Implementation
 ^^^^^^^^^^^^^^^^^^^
@@ -156,8 +188,11 @@ Development Guidelines
 
 When developing FIPS-compliant features:
 
-1. **Use FIPS-Approved Algorithms**: Always use FIPS-approved cryptographic algorithms
-2. **Test in FIPS Mode**: Test your code in FIPS-enabled environments
+1. **Use FIPS-Approved Algorithms**: AES (GCM or CBC), SHA-2, HMAC, PBKDF2 with a password of at least 14 bytes.
+   No password based cipher (``PBEWith*``), no MD5, no DES or 3DES. If in doubt, run it on an approved-only thread
+   the way ``FipsApprovedOnlyTest`` does; BC-FIPS will tell you.
+2. **Test in FIPS Mode**: ``FipsApprovedOnlyTest`` runs the approved-only checks in every build; ``FipsBootMigrationTest``
+   covers the migration of an existing data directory. Test on a host with the OS in FIPS mode before a release
 3. **Handle Provider Failures**: Implement proper fallback mechanisms
 4. **Log Security Events**: Log security-related events for audit purposes
 5. **Validate Inputs**: Validate all cryptographic inputs
@@ -321,7 +356,8 @@ When developing FIPS-compliant features, ensure compliance with the following st
     * Provide specific guidance on implementing cryptographic modules
 
 **Implementation Requirements**
-    * Use only FIPS-approved cryptographic algorithms (AES, 3DES, SHA-256, etc.)
+    * Use only FIPS-approved cryptographic algorithms (AES, SHA-256, HMAC, PBKDF2; 3DES is disallowed for
+      encryption since 2023 by SP 800-131A rev. 2)
     * Implement proper key management and storage
     * Ensure secure random number generation
     * Provide self-test capabilities

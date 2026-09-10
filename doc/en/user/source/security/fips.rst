@@ -40,15 +40,20 @@ FIPS mode is controlled by a single environment variable:
 This can also be set as a system property: ``-DFIPS_MODE=true``
 
 When ``FIPS_MODE=true``, GeoServer automatically:
-* Uses BCFKS keystore format
-* Registers BouncyCastle FIPS provider (BCFIPS)
-* Enforces FIPS-approved cryptographic algorithms
+
+* requests BouncyCastle approved-only mode, so non-approved algorithms fail instead of running (see
+  :ref:`fips_approved_only`)
+* registers the BouncyCastle FIPS provider (BCFIPS) first, so it serves every algorithm it offers
+* uses the BCFKS keystore format
+* writes passwords with the AES-GCM ``crypt3:`` encoder and the master password file with AES-GCM, and migrates
+  existing values on the first start
 
 When ``FIPS_MODE=false`` or unset:
-* Uses JCEKS keystore format
-* Uses standard Java cryptographic providers for the keystore
-* Still registers the BouncyCastle FIPS provider on demand, because the master password file, ``crypt2:``
-  passwords and URL parameter encryption always use the FIPS algorithm (see below)
+
+* uses the JCEKS keystore format
+* uses the standard Java cryptographic providers; BCFIPS is appended with the lowest priority the first time
+  something needs an algorithm only it offers
+* offers the same password encoders as GeoServer upstream, ``crypt1:``, ``crypt2:`` and ``crypt3:``
 
 Keystore Types
 --------------
@@ -63,15 +68,19 @@ Providers
 
 GeoServer uses two providers:
 
-* **BCFIPS**: BouncyCastle FIPS provider. Used for the BCFKS keystore in FIPS mode, and in **both** modes for the
-  strong password encoder (``crypt2:``), the encrypted master password file and URL parameter encryption. These
-  all use ``PBEWITHSHA256AND256BITAES-BC``, an algorithm name that only BCFIPS registers.
-* **SunJCE**: Java default provider. Used for the JCEKS keystore in non-FIPS mode.
+* **BCFIPS**: BouncyCastle FIPS provider. In FIPS mode it is registered first and serves everything it offers:
+  the BCFKS keystore, AES-GCM and PBKDF2 for the ``crypt3:`` encoder and the master password file, AES for URL
+  parameter encryption, and the DRBG behind every ``SecureRandom``.
+* **SunJCE** and the other JDK providers: used for the JCEKS keystore and everything else in non-FIPS mode, where
+  BCFIPS is appended with the lowest priority.
 
-BCFIPS is registered automatically the first time it is needed, so no ``java.security`` configuration is
-required. It is appended with the lowest priority, so algorithms the JDK also provides keep resolving to the
-JDK providers. The ``bc-fips`` and ``bcpkix-fips`` JARs must therefore be on the classpath in both modes; they
-are included in the GeoServer distribution.
+No ``java.security`` configuration is required, but the ``bc-fips`` and ``bcpkix-fips`` JARs must be on the
+classpath in both modes; they are included in the GeoServer distribution.
+
+The ``crypt2:`` encoder and the master password files of earlier versions used ``PBEWITHSHA256AND256BITAES-BC``, a
+PKCS#12 scheme that is not FIPS approved and that BCFIPS withdraws in approved-only mode. GeoServer reads those
+values with its own implementation of the scheme, built on SHA-256 and AES/CBC only, and re-encrypts them; nothing
+is written in that format in FIPS mode.
 
 Automatic Keystore Migration
 ----------------------------
@@ -169,9 +178,9 @@ Common Issues
 
 3. **Master Password Cannot Be Decrypted**
 
-   If GeoServer fails to start with ``Failed to decrypt master password with [PBEWITHSHA256AND256BITAES-BC,
-   PBEWithHmacSHA256AndAES_128, PBEWithMD5AndDES]``, none of the known algorithms could read the master password
-   file (``security/masterpw/default/passwd``):
+   If GeoServer fails to start with ``Failed to decrypt master password with AES-GCM or
+   [PBEWITHSHA256AND256BITAES-BC, PBEWithHmacSHA256AndAES_128, PBEWithMD5AndDES]``, neither the current format nor
+   any earlier one could read the master password file (``security/masterpw/default/passwd``):
 
    * On a FIPS-enabled operating system the usual cause is a file still encrypted with the legacy
      ``PBEWithMD5AndDES`` algorithm, which the OS blocks. Follow the
@@ -185,8 +194,9 @@ Common Issues
    If you see errors about password encoders or ``crypt1:`` prefixed passwords failing in FIPS mode:
    
    * The weak password encoder (``pbePasswordEncoder``) uses ``PBEWITHMD5ANDDES`` algorithm
-   * MD5 and DES algorithms are blocked on FIPS-enabled operating systems
-   * You must migrate passwords from ``crypt1:`` to ``crypt2:`` format before enabling FIPS mode
+   * MD5 and DES algorithms are blocked on FIPS-enabled operating systems, so such values cannot be read there
+   * Start GeoServer once with ``FIPS_MODE=true`` on a host without OS-level FIPS: ``crypt1:`` and ``crypt2:``
+     configuration and user passwords are re-encrypted as ``crypt3:`` during that start
    
    See the :ref:`Password Migration <fips_password_migration>` section below for instructions.
 

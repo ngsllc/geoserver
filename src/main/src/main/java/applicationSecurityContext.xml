@@ -65,6 +65,11 @@
     <property name="algorithm" value="#{ systemProperties['geoserver.encryption.algorithm'] ?: T(org.geoserver.security.KeyStoreProviderImpl).FIPS_PBE_ALGORITHM }" />
     <property name="availableWithoutStrongCryptogaphy" value="false" />
   </bean>  
+  <!-- AES-GCM reversible encoder, FIPS approved and the default in FIPS mode; same bean name and format as upstream -->
+  <bean id="aesGcmPasswordEncoder"
+    class="org.geoserver.security.password.GeoServerAesGcmPasswordEncoder" scope="prototype">
+    <property name="prefix" value="crypt3" />
+  </bean>
   <bean id="digestPasswordEncoder"    
     class="org.geoserver.security.password.GeoServerDigestPasswordEncoder" scope="prototype">
     <property name="prefix" value="digest1" />    

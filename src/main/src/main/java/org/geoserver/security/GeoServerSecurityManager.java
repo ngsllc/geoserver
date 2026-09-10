@@ -119,6 +119,7 @@ import org.geoserver.security.impl.RESTAccessRuleDAO;
 import org.geoserver.security.impl.ServiceAccessRuleDAO;
 import org.geoserver.security.impl.Util;
 import org.geoserver.security.password.ConfigurationPasswordEncryptionHelper;
+import org.geoserver.security.password.GeoServerAesGcmPasswordEncoder;
 import org.geoserver.security.password.GeoServerDigestPasswordEncoder;
 import org.geoserver.security.password.GeoServerPBEPasswordEncoder;
 import org.geoserver.security.password.GeoServerPasswordEncoder;
@@ -430,6 +431,13 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             keyStoreProvider.commitMasterPasswordChange();
             // check if there is an outstanding keystore password change in case of spring injection
             init();
+            if (KeyStoreProviderImpl.isFipsMode()) {
+                if (configPasswordEncoderMigrated) {
+                    updateConfigurationFilesWithEncryptedFields();
+                    configPasswordEncoderMigrated = false;
+                }
+                ensureFipsCompatibleUserGroupEncoders();
+            }
             for (GeoServerSecurityProvider securityProvider :
                     GeoServerExtensions.extensions(GeoServerSecurityProvider.class)) {
                 securityProvider.init(this);
@@ -445,10 +453,23 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
      * strong encoder before anything loads it. Existing values written by the weak encoder ({@code crypt1:}) cannot be
      * re-encrypted because the algorithm is unavailable; they have to be re-entered, see the FIPS documentation.
      */
+    /**
+     * Set when {@link #ensureFipsCompatibleConfigPasswordEncoder()} switched the encoder, so that the stored values get
+     * re-encrypted once the manager is initialized.
+     */
+    private boolean configPasswordEncoderMigrated;
+
+    /**
+     * FIPS mode: the configuration password encoder must be the AES-GCM one. Password based encoders (crypt1, crypt2)
+     * use ciphers that are not FIPS approved, so a data directory still configured with one is switched here, before
+     * initialization; the values already stored are re-encrypted right after it, while the old encoder can still read
+     * them (crypt2 through {@link org.geoserver.security.password.Pkcs12Pbe}, crypt1 through the JDK where the
+     * operating system still offers MD5/DES).
+     */
     void ensureFipsCompatibleConfigPasswordEncoder() throws Exception {
         Resource configFile = security().get(CONFIG_FILENAME);
         if (configFile.getType() != Type.RESOURCE) {
-            return; // fresh data directory, the defaults already select the strong encoder in FIPS mode
+            return; // fresh data directory, the defaults already select the AES-GCM encoder in FIPS mode
         }
         SecurityManagerConfig config = loadSecurityConfig();
         String name = config.getConfigPasswordEncrypterName();
@@ -456,18 +477,81 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             return;
         }
         Object encoder = GeoServerExtensions.bean(name);
-        if (encoder instanceof GeoServerPBEPasswordEncoder pbe && !pbe.isAvailableInFipsMode()) {
-            GeoServerPBEPasswordEncoder strong = loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, true);
-            if (strong == null) {
-                throw new IOException("FIPS mode is enabled but no FIPS compatible configuration password encoder is "
+        if (encoder instanceof GeoServerPBEPasswordEncoder pbe) {
+            GeoServerAesGcmPasswordEncoder target = loadPasswordEncoder(GeoServerAesGcmPasswordEncoder.class);
+            if (target == null) {
+                throw new IOException("FIPS mode is enabled but the AES-GCM configuration password encoder is not "
                         + "available to replace '" + name + "'");
             }
-            LOGGER.warning("FIPS mode: the configuration password encoder '" + name
-                    + "' uses an algorithm that is not available in FIPS mode, switching to '" + strong.getName()
-                    + "'. Passwords already stored with the '" + pbe.getPrefix()
-                    + ":' prefix cannot be decrypted in FIPS mode and must be re-entered.");
-            config.setConfigPasswordEncrypterName(strong.getName());
+            if (!pbe.isAvailableInFipsMode()) {
+                LOGGER.warning("FIPS mode: the configuration password encoder '" + name + "' uses " + pbe.getAlgorithm()
+                        + ", which this JVM does not offer. Passwords already stored with the '" + pbe.getPrefix()
+                        + ":' prefix cannot be decrypted and must be re-entered.");
+            }
+            LOGGER.warning("FIPS mode: switching the configuration password encoder from '" + name + "' ("
+                    + pbe.getPrefix() + ":) to '" + target.getName() + "' (" + target.getPrefix()
+                    + ":), stored configuration passwords will be re-encrypted");
+            config.setConfigPasswordEncrypterName(target.getName());
             xStreamPersist(configFile, config, globalPersister());
+            configPasswordEncoderMigrated = true;
+        }
+    }
+
+    /**
+     * FIPS mode: user group services whose passwords are encrypted with a password based encoder (crypt1, crypt2) get
+     * every password re-encrypted with the AES-GCM encoder and are switched to it. Runs after initialization, while the
+     * old encoder can still read the values, and only for services that can be written; a read only service with such
+     * passwords is reported, since its users will not be able to log in once the old cipher is gone.
+     */
+    void ensureFipsCompatibleUserGroupEncoders() throws Exception {
+        for (String name : listUserGroupServices()) {
+            SecurityUserGroupServiceConfig config = userGroupServiceHelper.loadConfig(name, true);
+            String encoderName = config.getPasswordEncoderName();
+            if (encoderName == null) {
+                continue;
+            }
+            GeoServerPasswordEncoder current = loadPasswordEncoder(encoderName);
+            if (!(current instanceof GeoServerPBEPasswordEncoder old)) {
+                continue;
+            }
+            GeoServerUserGroupService service = loadUserGroupService(name);
+            if (service == null) {
+                continue;
+            }
+            if (!service.canCreateStore()) {
+                LOGGER.severe("FIPS mode: user group service '" + name + "' is read only and its passwords use the '"
+                        + encoderName + "' encoder, whose cipher is not FIPS approved; they cannot be migrated and "
+                        + "the users will not be able to log in");
+                continue;
+            }
+            GeoServerAesGcmPasswordEncoder target = loadPasswordEncoder(GeoServerAesGcmPasswordEncoder.class);
+            if (target == null) {
+                throw new IOException("FIPS mode is enabled but the AES-GCM password encoder is not available");
+            }
+            old.initializeFor(service);
+            target.initializeFor(service);
+            GeoServerUserGroupStore store = service.createStore();
+            int migrated = 0;
+            for (GeoServerUser user : service.getUsers()) {
+                String stored = user.getPassword();
+                if (stored == null || !old.isResponsibleForEncoding(stored)) {
+                    continue;
+                }
+                char[] plain = old.decodeToCharArray(stored);
+                try {
+                    user.setPassword(target.encodePassword(plain, null));
+                } finally {
+                    SecurityUtils.scramble(plain);
+                }
+                store.updateUser(user);
+                migrated++;
+            }
+            store.store();
+            config.setPasswordEncoderName(target.getName());
+            userGroupServiceHelper.saveConfig(config);
+            userGroupServices.remove(name);
+            LOGGER.warning("FIPS mode: user group service '" + name + "' switched from the '" + encoderName
+                    + "' password encoder to '" + target.getName() + "', " + migrated + " password(s) re-encrypted");
         }
     }
 
@@ -2071,10 +2155,11 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             ugConfig.setCheckInterval(checkInterval);
             ugConfig.setFileName(XMLConstants.FILE_UR);
             ugConfig.setValidating(true);
-            // In FIPS mode, we need to use strong encryption since weak algorithms are not available
-            // In non-FIPS mode, start with weak encryption so plain passwords can be restored
-            boolean strong = KeyStoreProviderImpl.isFipsMode();
-            GeoServerPBEPasswordEncoder encoder = loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, strong);
+            // In FIPS mode only the AES-GCM encoder is approved; otherwise start with weak encryption so plain
+            // passwords can be restored, as upstream does
+            GeoServerPasswordEncoder encoder = KeyStoreProviderImpl.isFipsMode()
+                    ? loadPasswordEncoder(GeoServerAesGcmPasswordEncoder.class)
+                    : loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, false);
             ugConfig.setPasswordEncoderName(encoder.getName());
             ugConfig.setPasswordPolicyName(PasswordValidator.DEFAULT_NAME);
             saveUserGroupService(ugConfig);
@@ -2228,11 +2313,13 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         config.getAuthProviderNames().add(authProvider.getName());
         config.setEncryptingUrlParams(false);
 
-        // In FIPS mode, use strong encryption; otherwise start with weak encryption for compatibility
-        boolean useStrongEncryption = KeyStoreProviderImpl.isFipsMode();
+        // In FIPS mode only the AES-GCM encoder is approved; otherwise start with weak encryption for compatibility
         config.setConfigPasswordEncrypterName(
-                loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, useStrongEncryption)
-                        .getName());
+                KeyStoreProviderImpl.isFipsMode()
+                        ? loadPasswordEncoder(GeoServerAesGcmPasswordEncoder.class)
+                                .getName()
+                        : loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, false)
+                                .getName());
 
         // setup the default remember me service
         RememberMeServicesConfig rememberMeConfig = new RememberMeServicesConfig();

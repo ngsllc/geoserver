@@ -77,6 +77,9 @@ public class GeoserverInitStartupListener implements ServletContextListener {
     @Override
     @SuppressWarnings("PMD.CloseResource")
     public void contextInitialized(ServletContextEvent sce) {
+        // FIPS mode: approved-only has to be requested before the BouncyCastle provider class initializes, and the
+        // provider registered first, before anything asks for a cipher or a SecureRandom
+        org.geoserver.security.FipsRuntime.initialize();
         // enable JTS overlay-ng unless otherwise set (first thing, before JTS has a chance
         // to initialize itself)
         if (System.getProperty("jts.overlay") == null) {

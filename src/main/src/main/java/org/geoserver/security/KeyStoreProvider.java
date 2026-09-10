@@ -10,6 +10,7 @@ import java.security.Key;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.util.function.Function;
 import javax.crypto.SecretKey;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.security.password.PasswordValidator;
@@ -54,6 +55,30 @@ public interface KeyStoreProvider {
      * @throws IOException if the key exists but has the wrong type
      */
     SecretKey getSecretKey(String name) throws IOException;
+
+    /**
+     * A key derived from the secret stored under the alias, for encoders that cannot use the stored bytes directly.
+     * Implementations are expected to cache the result, since derivation is deliberately slow, and to forget it when
+     * the keystore contents change.
+     *
+     * <p>The default derives every time. The secret is handed to the derivation as the characters of its stored bytes,
+     * which is what GeoServer upstream does, so keys and the values encrypted under them stay readable across both.
+     *
+     * @param derivation applied to the stored secret, only when no key can be reused
+     */
+    default SecretKey getDerivedKey(String alias, Function<char[], SecretKey> derivation) throws IOException {
+        SecretKey secret = getSecretKey(alias);
+        if (secret == null) {
+            throw new IOException("No key for alias " + alias + " in key store "
+                    + getResource().path());
+        }
+        char[] chars = SecurityUtils.toChars(secret.getEncoded());
+        try {
+            return derivation.apply(chars);
+        } finally {
+            SecurityUtils.scramble(chars);
+        }
+    }
 
     /**
      * Gets the {@link SecretKey} object for this alias {@code null} if the alias does not exist
