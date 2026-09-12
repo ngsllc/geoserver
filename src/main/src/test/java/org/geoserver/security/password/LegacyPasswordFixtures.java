@@ -33,8 +33,6 @@ public final class LegacyPasswordFixtures {
 
     public static final String CONFIG_CRYPT2 = "crypt2:clTbdhAe/gHF0kC4BIBQNCqFsi5zjWrTSFVhxR/bv0M=";
 
-    public static final String CONFIG_CRYPT1 = "crypt1:an31vroYgMDDZp8Z2760P+LUp9Y9xlYm";
-
     /** A user group service key a test stages itself, and the admin password written under it. */
     public static final String USER_GROUP_KEY = "usergroup-key-for-fips-tests-0123456789ab";
 
@@ -53,6 +51,4 @@ public final class LegacyPasswordFixtures {
 
     /** Not decryptable under any key: too short to hold a salt and ciphertext. */
     public static final String DAMAGED_CRYPT2 = "crypt2:AAAA";
-
-    public static final String ADMIN_CRYPT1 = "crypt1:EAx6I/w61HEZ9uHnhEdKISg4myftJIOd";
 }
