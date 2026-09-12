@@ -174,10 +174,6 @@ public final class FipsSetup {
     }
 
     /**
-     * The random source GeoServer gets when it asks for one, as algorithm and provider. A missing algorithm name is not
-     * a fault. Java then uses the platform default, and what counts is which provider makes the bytes.
-     */
-    /**
      * The generator GeoServer draws from, built the way {@link FipsCryptoProviderSupplier#createSecureRandom} builds
      * it: the validated module's own, asked for by name. With the provider missing there is only the JVM default.
      */

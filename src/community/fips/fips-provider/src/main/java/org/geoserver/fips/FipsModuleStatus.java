@@ -39,7 +39,6 @@ public class FipsModuleStatus implements ModuleStatus {
         return FipsSetup.isFipsModuleReady();
     }
 
-    /** Enabled means non-approved algorithms throw rather than silently run. */
     /** Enabled means approved-only mode is in force, not merely asked for: non-approved algorithms fail. */
     @Override
     public boolean isEnabled() {

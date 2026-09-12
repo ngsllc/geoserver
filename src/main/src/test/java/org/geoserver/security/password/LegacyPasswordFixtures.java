@@ -42,5 +42,17 @@ public final class LegacyPasswordFixtures {
 
     public static final String ADMIN_CRYPT2 = "crypt2:Xy22jv6ushfgyFFQpEaumKpbsw0zz4e9ia9EQRP4V/Y=";
 
+    /**
+     * A password with characters outside US-ASCII, under {@link #USER_GROUP_KEY}. GeoServer 2.x stored it through the
+     * {@link String} API, so the bytes inside are UTF-8, which is what a login compares against. It is here to catch a
+     * migration that converts through the platform default charset instead.
+     */
+    public static final String NON_ASCII_PASSWORD = "\u0141odz-has\u0142o";
+
+    public static final String NON_ASCII_CRYPT2 = "crypt2:UQFJj4FmOhkkItNMi2lU8oWEiqWEb4Wm18Jn4BrVeic=";
+
+    /** Not decryptable under any key: too short to hold a salt and ciphertext. */
+    public static final String DAMAGED_CRYPT2 = "crypt2:AAAA";
+
     public static final String ADMIN_CRYPT1 = "crypt1:EAx6I/w61HEZ9uHnhEdKISg4myftJIOd";
 }

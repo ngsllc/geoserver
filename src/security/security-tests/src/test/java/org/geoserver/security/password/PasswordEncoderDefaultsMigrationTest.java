@@ -70,6 +70,9 @@ public class PasswordEncoderDefaultsMigrationTest extends GeoServerSystemTestSup
         LegacyDataDirectory.setSecretKey(
                 new File(security, "geoserver.jceks"), "JCEKS", "ug:default:key", USER_GROUP_KEY);
         LegacyDataDirectory.stageCrypt2UserPasswords(security);
+        // one password the migration cannot read, and one it must not corrupt
+        LegacyDataDirectory.addUser(security, "damaged", LegacyPasswordFixtures.DAMAGED_CRYPT2);
+        LegacyDataDirectory.addUser(security, "nonascii", LegacyPasswordFixtures.NON_ASCII_CRYPT2);
         staged = true;
     }
 
@@ -103,7 +106,9 @@ public class PasswordEncoderDefaultsMigrationTest extends GeoServerSystemTestSup
         String users =
                 Files.readString(new File(security, "usergroup/default/users.xml").toPath(), StandardCharsets.UTF_8);
         assertTrue(users, users.contains("password=\"crypt3:"));
-        assertFalse(users, users.contains("password=\"crypt2:"));
+        // everything readable moved; the one row that cannot be read is kept, see the test below
+        assertFalse(
+                users, users.replace(LegacyPasswordFixtures.DAMAGED_CRYPT2, "").contains("password=\"crypt2:"));
 
         GeoServerUserGroupService service = getSecurityManager().loadUserGroupService("default");
         assertEquals("aesGcmPasswordEncoder", service.getPasswordEncoderName());
@@ -114,6 +119,48 @@ public class PasswordEncoderDefaultsMigrationTest extends GeoServerSystemTestSup
         encoder.initializeFor(service);
         assertTrue(encoder.isPasswordValid(admin.getPassword(), ADMIN_PASSWORD, null));
         assertFalse(encoder.isPasswordValid(admin.getPassword(), "not-" + ADMIN_PASSWORD, null));
+    }
+
+    /**
+     * One password that cannot be read must not stop the migration, and must not stop GeoServer: reaching this test at
+     * all means the context came up. The row is left as it was, so nothing that could still be read is destroyed.
+     */
+    @Test
+    public void testUnreadablePasswordIsLeftAloneAndTheRestStillMigrates() throws Exception {
+        File security = new File(getTestData().getDataDirectoryRoot(), "security");
+        String users =
+                Files.readString(new File(security, "usergroup/default/users.xml").toPath(), StandardCharsets.UTF_8);
+
+        assertTrue("the unreadable row is kept verbatim", users.contains(LegacyPasswordFixtures.DAMAGED_CRYPT2));
+
+        GeoServerUserGroupService service = getSecurityManager().loadUserGroupService("default");
+        assertEquals(
+                LegacyPasswordFixtures.DAMAGED_CRYPT2,
+                service.getUserByUsername("damaged").getPassword());
+        // and the readable ones went across regardless
+        assertTrue(service.getUserByUsername("admin").getPassword().startsWith("crypt3:"));
+    }
+
+    /**
+     * The migration must write back the same password it read. The character array methods of both encoders convert
+     * through the platform default charset while a login compares UTF-8, so a password outside US-ASCII is where the
+     * two disagree; on a JVM whose default charset is neither (Windows) that would lock the user out for good.
+     */
+    @Test
+    public void testNonAsciiPasswordSurvivesTheMigration() throws Exception {
+        GeoServerUserGroupService service = getSecurityManager().loadUserGroupService("default");
+        GeoServerUser user = service.getUserByUsername("nonascii");
+        assertNotNull(user);
+        assertTrue(user.getPassword(), user.getPassword().startsWith("crypt3:"));
+
+        GeoServerAesGcmPasswordEncoder encoder =
+                getSecurityManager().loadPasswordEncoder(GeoServerAesGcmPasswordEncoder.class);
+        encoder.initializeFor(service);
+        assertEquals(LegacyPasswordFixtures.NON_ASCII_PASSWORD, encoder.decode(user.getPassword()));
+        // this is the comparison a login actually makes
+        assertTrue(
+                "the migrated password must still validate",
+                encoder.isPasswordValid(user.getPassword(), LegacyPasswordFixtures.NON_ASCII_PASSWORD, null));
     }
 
     /** The defaults said nothing about the keystore or the master password, so those stay as they were. */

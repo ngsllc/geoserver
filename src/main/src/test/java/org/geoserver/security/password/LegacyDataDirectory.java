@@ -94,6 +94,21 @@ public final class LegacyDataDirectory {
                 "<passwordEncoderName>strongPbePasswordEncoder</passwordEncoderName>");
     }
 
+    /**
+     * Adds a user row to the default user group service with the stored password given verbatim, so a test can stage a
+     * value the migration will not be able to read, or one written under a known key.
+     */
+    public static void addUser(File security, String username, String storedPassword) throws IOException {
+        File users = new File(security, "usergroup/default/users.xml");
+        String xml = Files.readString(users.toPath(), StandardCharsets.UTF_8);
+        String row = "        <user enabled=\"true\" name=\"" + username + "\" password=\"" + storedPassword + "\"/>\n";
+        String changed = xml.replace("    </users>", row + "    </users>");
+        if (changed.equals(xml)) {
+            throw new IllegalStateException(users + " has no </users> to add a user before");
+        }
+        Files.writeString(users.toPath(), changed, StandardCharsets.UTF_8);
+    }
+
     /** Names the configuration password encoder in the security configuration. */
     public static void setConfigPasswordEncoder(File security, String encoderName) throws IOException {
         replace(

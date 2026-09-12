@@ -315,8 +315,15 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
      * The keystore an installation configured for another format left behind, or null on a fresh data directory.
      * Finding one means keys, not a fresh install: GeoServer must never create an empty keystore next to it, or every
      * password encrypted with the old keys silently stops decrypting.
+     *
+     * <p>Only a deployment that asks for a keystore type through {@link SecurityDefaults} moves one, and only towards
+     * that type. A stock GeoServer never converts anything: it has no reason to, and a file of another format under
+     * {@code security/} may not be GeoServer's at all — a truststore kept there would be renamed away by a conversion
+     * nobody asked for. Without that setting an existing keystore of another format is reported, as before, and
+     * {@link #reportForeignKeyStore} explains it.
      */
     private ExistingKeyStore findKeyStoreOfAnotherFormat() throws IOException {
+        boolean migrates = SecurityDefaults.get(SecurityDefaults.Setting.KEYSTORE_TYPE, null) != null;
         for (KeyStoreFormat format : KeyStoreFormat.values()) {
             if (format.name().equalsIgnoreCase(keyStoreType())) {
                 continue;
@@ -333,9 +340,23 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                         + content + " file. Rename it to " + KeyStoreFormat.fileName(content.name())
                         + ", or convert it.");
             }
+            if (!migrates) {
+                reportForeignKeyStore(other);
+            }
             return new ExistingKeyStore(other, format);
         }
         return null;
+    }
+
+    /**
+     * Stops a stock GeoServer that finds a keystore of another format where its own should be. It holds the keys of
+     * some installation, so creating an empty one beside it would silently strand every password encrypted with them.
+     */
+    private void reportForeignKeyStore(Resource other) throws IOException {
+        throw new IOException("Key store " + other.path() + " holds the keys of this installation, but it is "
+                + "configured for " + keyStoreType() + ", read from "
+                + getResource().path()
+                + ". Convert the file, or configure that type.");
     }
 
     /**
@@ -402,8 +423,23 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         if (!ks.containsAlias(CONFIGPASSWORDKEY)) {
             addInitialKeys();
         }
-        try (OutputStream out = getResource().out()) {
-            ks.store(out, passwd);
+        // Write through a temporary file and move it into place only once it is whole. Written straight to its
+        // final path, a store() that fails half way leaves a short or empty keystore there, and the next start
+        // finds a file where it expects one, stops entering this branch, and fails to load it for ever, with the
+        // intact source sitting untouched next to it.
+        Resource pending = getResource().parent().get(getResource().name() + ".new");
+        try {
+            try (OutputStream out = pending.out()) {
+                ks.store(out, passwd);
+            }
+            if (!pending.renameTo(getResource())) {
+                throw new IOException("Could not move the converted key store " + pending.path() + " into place as "
+                        + getResource().path());
+            }
+        } finally {
+            if (pending.getType() != Type.UNDEFINED) {
+                pending.delete();
+            }
         }
 
         Resource backup = file.parent().get(file.name() + ".backup");

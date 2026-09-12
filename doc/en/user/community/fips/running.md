@@ -25,7 +25,8 @@ at `WARNING`:
 Two of these steps read the old formats through the Java runtime rather than through the FIPS
 provider: JCEKS and MD5/DES come from the JDK providers, which stay registered behind the FIPS one.
 On a machine already in FIPS mode the system cryptographic policy has removed them from Java, and
-GeoServer stops at the first of them with a message saying so. **Do the move before turning FIPS
+GeoServer stops at the first of them — the master password — with a message naming the file, the
+constraint and this page. **Do the move before turning FIPS
 mode on for the machine**, or on another machine: install the FIPS module, start GeoServer once on
 the existing data directory, check the log and the **FIPS** tab, then put the machine in FIPS mode
 and start it again. The `crypt2` step does not have this constraint: `crypt2` values are read with
@@ -35,17 +36,35 @@ cipher that wrote them.
 Things the move cannot do, each reported at `SEVERE` in the log:
 
 - A user group service that cannot be written, such as one backed by a read-only file or a
-  directory, keeps its `crypt1` or `crypt2` passwords. Its users cannot log in under FIPS until the
-  passwords are set again by whatever manages that service.
+  directory, keeps its `crypt1` or `crypt2` passwords. Its `crypt2` users go on logging in normally,
+  since those values stay readable; its `crypt1` users cannot log in until the passwords are set
+  again by whatever manages that service.
 - `crypt1` values on a machine whose Java runtime no longer offers MD5/DES cannot be read, so they
   cannot be written again either. The encoders are switched all the same; the passwords have to be
   entered again.
-- The master password stored somewhere other than a file, or by a read-only provider, is left as it
-  is. Store it again from **Security > Passwords**.
+- The master password is left as it is when it is stored by a read-only provider, or anywhere other
+  than a file — there is nowhere to keep a copy of the old form, so it is not rewritten. GeoServer
+  runs, because the old form is still readable on this machine, but it will not be once the machine
+  is in FIPS mode. Store the password again from **Security > Passwords**, through a writable
+  file-backed provider, before then.
+- A user password that cannot be read — damaged, hand edited, or encrypted under another
+  installation's key — is left as it is and named in the log. That user cannot log in; set their
+  password again. The rest of the service is migrated normally.
 
-Keep the `.backup` files until the deployment has run for a while. Together with the old
+**Copy the data directory before the first FIPS start.** The move rewrites the keystore, the master
+password and every stored password in place, and there is no dry run: the only way to try it is to
+try it. A copy is also the quickest way back if something about the result is not what you expected.
+
+Keep the `.backup` files afterwards until the deployment has run for a while. Together with the old
 `config.xml` files, which the version control of your choice should hold anyway, they take the
 directory back to the normal GeoServer it came from.
+
+If a start fails part way through the move, look at what the log reached before the error. Each step
+either completes or leaves the directory as it was, and a step that completed is skipped on the next
+start, so fixing what the message names and starting again continues from there. The one case that
+needs a hand is a master password file that was rewritten while its configuration was not, or the
+reverse, which leaves GeoServer unable to read its own master password: restore
+`security/masterpw/default/passwd` from the `.backup` beside it and start again.
 
 ## Starting from a new data directory
 
@@ -90,8 +109,10 @@ The tab has two tables. The first one reports the cryptography in force, with sh
 | Master password storage | `AES-GCM file` | How the master password is kept. |
 | Random source | generator and provider | The generator GeoServer draws salts, initialization vectors and keys from, with the provider in round brackets. GeoServer asks the FIPS provider for it by name, so a provider other than `BCFIPS` means the provider is not installed. |
 
-The keystore, encoder and master password values are what this data directory was created with, and
-cannot be changed on an existing one.
+The keystore, encoder and master password values are what this data directory currently uses. On a
+directory created without FIPS they are what the move set, see
+[Moving an existing data directory](#moving-an-existing-data-directory); they are not settings to
+change by hand on a running installation.
 
 The second table lists the four algorithms GeoServer cannot work without, with a yes or no each: the
 keystore format, `AES/GCM/NoPadding`, `PBKDF2WithHmacSHA256` and `SHA-256`. A `no` on any of them
