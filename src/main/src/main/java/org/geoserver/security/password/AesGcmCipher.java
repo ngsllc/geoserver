@@ -10,7 +10,6 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.security.SecureRandom;
 import java.util.Arrays;
 import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
@@ -18,6 +17,7 @@ import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.PBEKeySpec;
 import javax.crypto.spec.SecretKeySpec;
+import org.geoserver.security.CryptoProviders;
 
 /**
  * Makes a key from a password, then encrypts with it. Two steps, because no FIPS provider offers a {@code Cipher} that
@@ -48,14 +48,16 @@ public final class AesGcmCipher {
      */
     private static final int ITERATIONS = 600_000;
 
-    private static final SecureRandom RANDOM = new SecureRandom();
-
     private AesGcmCipher() {}
 
-    /** Random bytes from the JVM default source, for salts and other non secret material. */
+    /**
+     * Random bytes for salts and initialization vectors, from the source the crypto provider supplier picked, see
+     * {@link CryptoProviders#secureRandom()}. Under FIPS that is the validated module's own generator, asked for by
+     * name, so that provider order cannot quietly hand the job to a JDK one.
+     */
     public static byte[] randomBytes(int length) {
         byte[] bytes = new byte[length];
-        RANDOM.nextBytes(bytes);
+        CryptoProviders.secureRandom().nextBytes(bytes);
         return bytes;
     }
 
@@ -80,7 +82,7 @@ public final class AesGcmCipher {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
             return Arrays.copyOf(digest, SALT_LENGTH);
         } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException("Could not derive the encryption salt", e);
+            throw new IllegalStateException("Could not derive the encryption salt", e);
         } finally {
             scramble(bytes);
         }
@@ -92,7 +94,12 @@ public final class AesGcmCipher {
             byte[] derived = SecretKeyFactory.getInstance(KEY_DERIVATION_ALGORITHM)
                     .generateSecret(new PBEKeySpec(password, salt, ITERATIONS, KEY_LENGTH_BITS))
                     .getEncoded();
-            return new SecretKeySpec(derived, "AES");
+            try {
+                // the spec copies the bytes, so this array is one copy of the key too many
+                return new SecretKeySpec(derived, "AES");
+            } finally {
+                scramble(derived);
+            }
         } catch (GeneralSecurityException e) {
             throw new RuntimeException("Could not derive an encryption key", e);
         }

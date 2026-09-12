@@ -89,6 +89,19 @@ public final class FipsSetup {
     }
 
     /**
+     * Approved-only mode as it stands, in one word: {@code on} when it is in force, {@code off} when it was not asked
+     * for, and a warning when it was asked for but did not take effect, which {@link FipsCryptoProviderSupplier} does
+     * not let a deployment start with, but a reader of this value may not know that.
+     */
+    public static String describeApprovedOnlyMode() {
+        boolean inForce = isApprovedOnlyForThisThread();
+        if (inForce) {
+            return "on";
+        }
+        return isApprovedOnlyRequested() ? "requested, but NOT in force" : "off";
+    }
+
+    /**
      * Whether the operating system is in FIPS mode, empty when it does not say. A JVM can run the validated module on a
      * system that is not in FIPS mode. That is fine for testing, but it is not a compliant deployment.
      */
@@ -125,7 +138,7 @@ public final class FipsSetup {
         Provider provider = Security.getProvider(BouncyCastleFipsProvider.PROVIDER_NAME);
         return List.of(
                 new Fact("Crypto module", getFipsModuleStatus()),
-                new Fact("Approved-only mode", isApprovedOnlyRequested() ? "on" : "off"),
+                new Fact("Approved-only mode", describeApprovedOnlyMode()),
                 new Fact(
                         "Operating system FIPS mode",
                         isOperatingSystemInFipsMode()
@@ -164,11 +177,23 @@ public final class FipsSetup {
      * The random source GeoServer gets when it asks for one, as algorithm and provider. A missing algorithm name is not
      * a fault. Java then uses the platform default, and what counts is which provider makes the bytes.
      */
+    /**
+     * The generator GeoServer draws from, built the way {@link FipsCryptoProviderSupplier#createSecureRandom} builds
+     * it: the validated module's own, asked for by name. With the provider missing there is only the JVM default.
+     */
     @SuppressFBWarnings(
             value = "DMI_RANDOM_USED_ONLY_ONCE",
             justification = "the instance is built to be described, not to produce bytes")
     private static String getRandomSource() {
-        SecureRandom random = new SecureRandom();
+        Provider provider = Security.getProvider(BouncyCastleFipsProvider.PROVIDER_NAME);
+        SecureRandom random;
+        try {
+            random = provider == null
+                    ? new SecureRandom()
+                    : new FipsCryptoProviderSupplier().createSecureRandom(provider);
+        } catch (IllegalStateException e) {
+            return e.getMessage();
+        }
         return random.getAlgorithm() + " (" + random.getProvider().getName() + ")";
     }
 

@@ -14,13 +14,18 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
+import static org.junit.Assume.assumeNoException;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.KeyStoreException;
 import java.util.Arrays;
 import java.util.Map;
 import javax.crypto.SecretKey;
+import javax.crypto.spec.SecretKeySpec;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.security.KeyStoreFormat;
 import org.geoserver.security.password.AesGcmCipher;
@@ -93,27 +98,82 @@ public class KeyStoreProviderTest extends GeoServerSystemTestSupport {
     }
 
     /**
-     * A keystore left under the name of another type must stop GeoServer, not be replaced by an empty one. Replacing it
-     * loses the keys every stored password was encrypted with, and nothing says so at startup.
+     * A keystore left under the name of another type holds the keys of this installation: its entries are moved into a
+     * new keystore of the configured type, and the file is kept as a backup. That is how a data directory written by a
+     * regular GeoServer, with a JCEKS keystore, starts under FIPS with a BCFKS one and the same keys.
      */
     @Test
-    public void testKeyStoreOfAnotherTypeStopsTheStartup() throws Exception {
+    public void testKeyStoreOfAnotherTypeIsMoved() throws Exception {
+        KeyStore source;
+        try {
+            source = KeyStore.getInstance(otherType().name());
+        } catch (KeyStoreException e) {
+            assumeNoException("no provider here offers " + otherType() + ", the move cannot be staged", e);
+            return;
+        }
+        KeyStoreProvider ksp = getSecurityManager().getKeyStoreProvider();
+        Resource current = keyStore();
+        Resource other = getSecurityManager()
+                .security()
+                .get(KeyStoreFormat.fileName(otherType().name()));
+        Resource backup = other.parent().get(other.name() + ".backup");
+        byte[] saved = read(current);
+
+        char[] passwd = getSecurityManager().getMasterPassword();
+        source.load(null, passwd);
+        source.setEntry(
+                "movedKey",
+                new KeyStore.SecretKeyEntry(
+                        new SecretKeySpec("moved-secret".getBytes(StandardCharsets.US_ASCII), "HmacSHA256")),
+                new KeyStore.PasswordProtection(passwd));
+        try (OutputStream out = other.out()) {
+            source.store(out, passwd);
+        }
+        current.delete();
+        try {
+            ksp.reloadKeyStore();
+
+            assertEquals(Resource.Type.RESOURCE, current.getType());
+            assertEquals(
+                    KeyStoreProviderImpl.keyStoreType(),
+                    KeyStoreFormat.detect(current).name());
+            assertEquals(Resource.Type.UNDEFINED, other.getType());
+            assertEquals(Resource.Type.RESOURCE, backup.getType());
+            // the bytes are what matter, the label follows the configured type
+            assertEquals(
+                    "moved-secret", new String(ksp.getSecretKey("movedKey").getEncoded(), StandardCharsets.US_ASCII));
+            assertEquals(
+                    KeyStoreProviderImpl.KEY_ALGORITHM,
+                    ksp.getSecretKey("movedKey").getAlgorithm());
+            // the moved store had no configuration key, so the new one gets one
+            assertTrue(ksp.hasConfigPasswordKey());
+        } finally {
+            backup.delete();
+            other.delete();
+            write(current, saved);
+            ksp.reloadKeyStore();
+        }
+    }
+
+    /** Named for one type, holding another: nothing is moved, GeoServer stops and says which name would be right. */
+    @Test
+    public void testKeyStoreNamedForAnotherTypeWithForeignContentStopsTheStartup() throws Exception {
         KeyStoreProvider ksp = getSecurityManager().getKeyStoreProvider();
         Resource current = keyStore();
         Resource other = getSecurityManager()
                 .security()
                 .get(KeyStoreFormat.fileName(otherType().name()));
         byte[] saved = read(current);
+        KeyStoreFormat configured = KeyStoreFormat.valueOf(KeyStoreProviderImpl.keyStoreType());
 
-        // one keystore, under the name of a type this installation is not configured for
+        // this installation's keystore, under the name of the other type
         write(other, saved);
         current.delete();
         try {
             IOException e = assertThrows(IOException.class, ksp::reloadKeyStore);
             assertEquals(
-                    "Key store " + other.path() + " holds the keys of this installation, but it is configured for "
-                            + KeyStoreProviderImpl.keyStoreType() + ", read from " + current.path()
-                            + ". Convert the file, or configure that type.",
+                    "Key store " + other.path() + " is named for " + otherType() + " but holds a " + configured
+                            + " file. Rename it to " + current.name() + ", or convert it.",
                     e.getMessage());
         } finally {
             write(current, saved);

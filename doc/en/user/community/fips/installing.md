@@ -23,7 +23,7 @@ stock GeoServer does not start on a machine that is already in FIPS mode.
 
 4.  A war file is a zip file. Unpack it, replace the three regular BouncyCastle jars in
     `WEB-INF/lib` with the ones from the plugin archive, delete the data directory bundled in the
-    war, then pack it again:
+    war (a deployment points at its own anyway), then pack it again:
 
     ``` bash
     unzip -q geoserver.war -d geoserver
@@ -32,14 +32,15 @@ stock GeoServer does not start on a machine that is already in FIPS mode.
        geoserver/WEB-INF/lib/bcutil-lts8on-*.jar
     unzip -q -o geoserver-<version>-fips-plugin.zip -d geoserver/WEB-INF/lib
     ls geoserver/WEB-INF/lib | grep -i '^bc'     # only the fips jars, nothing else
-    rm -rf geoserver/data                        # a 2.x data directory, unusable under FIPS
+    rm -rf geoserver/data                        # the bundled sample data directory
     (cd geoserver && zip -q -r ../geoserver-fips.war .)
     ```
 
 5.  Deploy `geoserver-fips.war` under the name the old one had.
 
-6.  Point GeoServer at a **new** data directory, see [Running GeoServer under FIPS](running.md), and
-    start it again.
+6.  Point GeoServer at its data directory and start it again. An existing directory is moved to the
+    FIPS formats on this start, which has to happen while the machine is not yet in FIPS mode; a
+    new one is created in them. See [Running GeoServer under FIPS](running.md) for both.
 
 7.  Log in and open **About & Status > Server Status**, tab **FIPS**. The tab exists only when the
     module is installed. Read it before configuring anything else, see
@@ -65,6 +66,19 @@ system only the packaged runtime reads the system cryptographic policy and appli
 The module turns on approved-only mode. A request for a non-approved algorithm then fails instead
 of running quietly. Leave it off and the deployment is not FIPS compliant, because the validated
 module still serves MD5 and DES.
+
+The provider reads the setting once, while its class loads, and the module sets it just before
+loading that class. If something else in the same JVM loaded a BouncyCastle class first, another web
+application in the container for instance, or a monitoring agent, the setting comes too late and the
+provider runs without it. GeoServer checks for that and refuses to start rather than run
+non-approved algorithms while reporting that it does not; the message names the fix, which is to
+give the JVM the setting from the start:
+
+```
+-Dorg.bouncycastle.fips.approved_only=true
+```
+
+Do that anyway on a container that hosts more than GeoServer.
 
 A system property turns it off, and the FIPS tab then reports that:
 

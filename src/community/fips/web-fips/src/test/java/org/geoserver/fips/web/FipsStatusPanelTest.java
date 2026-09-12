@@ -55,6 +55,12 @@ public class FipsStatusPanelTest extends GeoServerWicketTestSupport {
         assertThat(values, hasItem("AES-GCM"));
     }
 
+    /** In force, not merely asked for: the value comes from the provider, not from the property. */
+    @Test
+    public void testApprovedOnlyModeIsInForce() {
+        assertEquals("on", factValue("Approved-only mode"));
+    }
+
     @Test
     public void testProviderIsAheadOfTheJdkProviders() {
         assertEquals("first", factValue("Provider position"));
