@@ -1,20 +1,72 @@
 # Running GeoServer under FIPS
 
-## Start from a new data directory
+## Moving an existing data directory
 
-A FIPS GeoServer cannot open a data directory written by a normal one, and it fails on the first
-start. Two things in it use algorithms that approved-only mode refuses:
+A data directory written by a normal GeoServer uses algorithms that approved-only mode refuses,
+in three places:
 
-- The keystore holding the configuration keys is a JCEKS file, whose password protection is MD5 and
-  DES.
-- Stored passwords name the encryption that wrote them: `crypt1` for user and group
-  passwords, `crypt2` for store connection passwords. Neither can be read under FIPS.
+- The keystore holding the configuration keys is a JCEKS file, whose password protection is MD5
+  and DES.
+- The master password is stored in a file protected with MD5 and DES.
+- Stored passwords name the encryption that wrote them: `crypt1` (MD5 and DES) for the oldest
+  installations, `crypt2` (a PKCS#12 scheme of the regular BouncyCastle provider) for everything
+  after. Both are used for user and group passwords and for store connection passwords.
 
-There is no migration tool yet. Point the deployment at an empty directory, let GeoServer fill it,
-then configure the services, stores, layers and users again. Create that directory before you start:
-GeoServer ignores a `GEOSERVER_DATA_DIR` that does not exist and builds one inside the web
-application instead. You can copy everything unencrypted from the old directory, such as the layer
-and service configuration, the styles and the access rules. The `security` directory stays behind.
+GeoServer moves all of it on the first start with the FIPS module installed, and logs each step
+at `WARNING`:
+
+| what | before | after | the old file |
+| --- | --- | --- | --- |
+| keystore | `security/geoserver.jceks` | `security/geoserver.bcfks`, same keys | kept as `geoserver.jceks.backup` |
+| master password | `security/masterpw/default/passwd`, MD5 and DES | same file, AES-GCM; the provider configuration names `AesGcmMasterPasswordProvider` | kept as `passwd.backup` |
+| configuration password encoder | `crypt1` or `crypt2` | `crypt3`, every store password written again | none, the configuration files are rewritten in place |
+| user group services on `crypt1` or `crypt2` | | switched to `crypt3`, every password written again | none |
+
+Two of these steps read the old formats through the Java runtime rather than through the FIPS
+provider: JCEKS and MD5/DES come from the JDK providers, which stay registered behind the FIPS one.
+On a machine already in FIPS mode the system cryptographic policy has removed them from Java, and
+GeoServer stops at the first of them — the master password — with a message naming the file, the
+constraint and this page. **Do the move before turning FIPS
+mode on for the machine**, or on another machine: install the FIPS module, start GeoServer once on
+the existing data directory, check the log and the **FIPS** tab, then put the machine in FIPS mode
+and start it again. The `crypt2` step does not have this constraint: `crypt2` values are read with
+the approved building blocks of that scheme, SHA-256 and AES, without asking any provider for the
+cipher that wrote them.
+
+Things the move cannot do, each reported at `SEVERE` in the log:
+
+- A user group service that cannot be written, such as one backed by a read-only file or a
+  directory, keeps its `crypt1` or `crypt2` passwords. Its `crypt2` users go on logging in normally,
+  since those values stay readable; its `crypt1` users cannot log in until the passwords are set
+  again by whatever manages that service.
+- `crypt1` values on a machine whose Java runtime no longer offers MD5/DES cannot be read, so they
+  cannot be written again either. The encoders are switched all the same; the passwords have to be
+  entered again.
+- The master password is left as it is when it is stored by a read-only provider, or anywhere other
+  than a file — there is nowhere to keep a copy of the old form, so it is not rewritten. GeoServer
+  runs, because the old form is still readable on this machine, but it will not be once the machine
+  is in FIPS mode. Store the password again from **Security > Passwords**, through a writable
+  file-backed provider, before then.
+- A user password that cannot be read — damaged, hand edited, or encrypted under another
+  installation's key — is left as it is and named in the log. That user cannot log in; set their
+  password again. The rest of the service is migrated normally.
+
+**Copy the data directory before the first FIPS start.** The move rewrites the keystore, the master
+password and every stored password in place, and there is no dry run: the only way to try it is to
+try it. A copy is also the quickest way back if something about the result is not what you expected.
+
+Keep the `.backup` files afterwards until the deployment has run for a while. Together with the old
+`config.xml` files, which the version control of your choice should hold anyway, they take the
+directory back to the normal GeoServer it came from.
+
+If a start fails part way through the move, look at what the log reached before the error. Each step
+either completes or leaves the directory as it was, and a step that completed is skipped on the next
+start, so fixing what the message names and starting again continues from there. The one case that
+needs a hand is a master password file that was rewritten while its configuration was not, or the
+reverse, which leaves GeoServer unable to read its own master password: restore
+`security/masterpw/default/passwd` from the `.backup` beside it and start again.
+
+## Starting from a new data directory
 
 A directory GeoServer creates under FIPS differs from a normal one in three places. All three are
 visible in the **FIPS** tab of **About & Status > Server Status**:
@@ -25,6 +77,9 @@ visible in the **FIPS** tab of **About & Status > Server Status**:
 | encryption of stored passwords | `crypt1` and `crypt2` | `crypt3`, AES-GCM with a key derived by PBKDF2 |
 | storage of the master password | password based encryption in a file | AES-GCM in a file |
 
+Create that directory before you start: GeoServer ignores a `GEOSERVER_DATA_DIR` that does not
+exist and builds one inside the web application instead.
+
 !!! note
     The keystore file is named after its format. A normal install keeps `security/geoserver.jceks`,
     a FIPS one gets `security/geoserver.bcfks`. GeoServer checks the first bytes of the file against
@@ -32,8 +87,7 @@ visible in the **FIPS** tab of **About & Status > Server Status**:
     keystore and losing the keys your passwords were encrypted with.
 
 The `crypt3` encryption is not FIPS specific. It uses algorithms every Java runtime offers, so a
-normal GeoServer with the same keystore reads a value written under FIPS. Only the other direction
-fails, and that is the gap a migration tool would close.
+normal GeoServer with the same keystore reads a value written under FIPS.
 
 As on any new data directory, the administrator account is the standard one, `admin` with password
 `geoserver`. Change it on first login, from **Security > Users, Groups, Roles**.
@@ -45,7 +99,7 @@ The tab has two tables. The first one reports the cryptography in force, with sh
 | Item | Value in a FIPS deployment | Meaning |
 | --- | --- | --- |
 | Crypto module | `READY` | The validated module passed its own self tests when GeoServer started. Any other value means the deployment is not FIPS compliant, whatever the rest of the page says. |
-| Approved-only mode | `on` | A request for a non-approved algorithm fails. `off` means non-approved algorithms are allowed to run. |
+| Approved-only mode | `on` | A request for a non-approved algorithm fails. `off` means it was turned off with a system property and non-approved algorithms are allowed to run. `requested, but NOT in force` means it was asked for but the provider was initialized by something else before the request could reach it; GeoServer refuses to start in that state, see [Approved-only mode](installing.md#approved-only-mode), so a running instance never shows it. |
 | Operating system FIPS mode | `yes` | The kernel FIPS flag. `no` means the machine is not in FIPS mode, `unknown` that it does not say. The module cannot set it, see [Installing the FIPS module](installing.md). |
 | Crypto provider | `BCFIPS` and its version | The validated module registered with Java. `not installed` means GeoServer is not using it. |
 | Provider position | `first` | Java uses the first provider that offers an algorithm. `behind <name>` means another provider answers first and does the work outside the validated module. |
@@ -53,10 +107,12 @@ The tab has two tables. The first one reports the cryptography in force, with sh
 | Config password encoder | `AES-GCM` | How passwords in the catalog are encrypted, such as store connection parameters. |
 | User password encoder | `AES-GCM` | How passwords held by user group services are encrypted. |
 | Master password storage | `AES-GCM file` | How the master password is kept. |
-| Random source | generator and provider | The generator serving random bytes, with the provider in round brackets. A provider other than `BCFIPS` means the bytes come from outside the validated module. |
+| Random source | generator and provider | The generator GeoServer draws salts, initialization vectors and keys from, with the provider in round brackets. GeoServer asks the FIPS provider for it by name, so a provider other than `BCFIPS` means the provider is not installed. |
 
-The keystore, encoder and master password values are what this data directory was created with, and
-cannot be changed on an existing one.
+The keystore, encoder and master password values are what this data directory currently uses. On a
+directory created without FIPS they are what the move set, see
+[Moving an existing data directory](#moving-an-existing-data-directory); they are not settings to
+change by hand on a running installation.
 
 The second table lists the four algorithms GeoServer cannot work without, with a yes or no each: the
 keystore format, `AES/GCM/NoPadding`, `PBKDF2WithHmacSHA256` and `SHA-256`. A `no` on any of them
@@ -92,7 +148,7 @@ MessageDigest SHA-256: yes
 ```
 
 The same entry has two boolean fields: **Available** is true when the module self tests passed,
-**Enabled** when approved-only mode is on.
+**Enabled** when approved-only mode is in force for the thread answering the request.
 
 !!! note
     The `json` and `xml` forms of `rest/about/status` list module names and links only, with no

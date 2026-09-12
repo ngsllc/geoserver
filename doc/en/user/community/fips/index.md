@@ -17,9 +17,11 @@ federal ones or their suppliers.
 </div>
 
 !!! warning
-    A data directory written by a normal GeoServer cannot be opened by a FIPS one. Passwords and the
-    keystore use algorithms that approved-only mode refuses. Start from a new data directory; there
-    is no migration tool yet. See [Running GeoServer under FIPS](running.md).
+    A data directory written by a normal GeoServer stores its passwords and keys with algorithms that
+    approved-only mode refuses. GeoServer moves them to the FIPS formats on the first start with the
+    module installed, but two of the steps need algorithms a machine already in FIPS mode no longer
+    offers, so that first start has to happen before the machine is put in FIPS mode. See
+    [Moving an existing data directory](running.md#moving-an-existing-data-directory).
 
 !!! warning
     The FIPS module works on Linux only.

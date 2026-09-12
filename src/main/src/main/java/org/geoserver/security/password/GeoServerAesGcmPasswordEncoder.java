@@ -10,13 +10,16 @@ import static org.geoserver.security.SecurityUtils.toChars;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
+import java.security.MessageDigest;
 import java.util.Base64;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 import javax.crypto.SecretKey;
 import org.geoserver.security.GeoServerSecurityManager;
 import org.geoserver.security.GeoServerUserGroupService;
 import org.geoserver.security.KeyStoreProvider;
 import org.geoserver.security.KeyStoreProviderImpl;
+import org.geotools.util.logging.Logging;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
@@ -26,13 +29,17 @@ import org.springframework.security.crypto.password.PasswordEncoder;
  * <p>The older password based encoders cannot work under FIPS, see {@link AesGcmCipher}.
  *
  * <p>The encoded form is {@code base64(}{@link AesGcmCipher#encrypt}{@code )}. Unlike the older encoders, a changed
- * value is detected and refused instead of decoding into meaningless characters.
+ * value, or one encrypted under another key, is detected: it fails to validate and cannot be decoded, instead of
+ * decoding into meaningless characters. Validation treats such a value as a wrong password rather than an error, so a
+ * single damaged entry cannot take a login page down, and compares in constant time.
  *
  * <p>The {@code char[]} methods wipe the plain text before returning, so it never reaches an object that cannot be
  * cleared. The {@code String} methods cannot do that, because {@link PasswordEncoder} takes and returns a
  * {@code String}: there the plain text stays on the heap until it is collected.
  */
 public class GeoServerAesGcmPasswordEncoder extends AbstractGeoserverPasswordEncoder {
+
+    private static final Logger LOGGER = Logging.getLogger(GeoServerAesGcmPasswordEncoder.class);
 
     private KeyStoreProvider keystoreProvider;
     private String keyAliasInKeyStore = KeyStoreProviderImpl.CONFIGPASSWORDKEY;
@@ -51,6 +58,10 @@ public class GeoServerAesGcmPasswordEncoder extends AbstractGeoserverPasswordEnc
                     + keystoreProvider.getResource().path());
         }
         keyAliasInKeyStore = keystoreProvider.aliasForGroupService(service.getName());
+    }
+
+    public String getKeyAliasInKeyStore() {
+        return keyAliasInKeyStore;
     }
 
     @Override
@@ -73,7 +84,15 @@ public class GeoServerAesGcmPasswordEncoder extends AbstractGeoserverPasswordEnc
 
             @Override
             public boolean matches(CharSequence rawPassword, String encodedPassword) {
-                return decodeInternal(encodedPassword).equals(rawPassword.toString());
+                if (rawPassword == null || encodedPassword == null) {
+                    return false;
+                }
+                byte[] raw = rawPassword.toString().getBytes(StandardCharsets.UTF_8);
+                try {
+                    return matchesDecrypted(encodedPassword, raw);
+                } finally {
+                    scramble(raw);
+                }
             }
         };
     }
@@ -96,13 +115,14 @@ public class GeoServerAesGcmPasswordEncoder extends AbstractGeoserverPasswordEnc
 
             @Override
             public boolean isPasswordValid(String encPass, char[] rawPass, Object salt) {
-                byte[] decrypted = decryptToBytes(encPass);
-                char[] chars = toChars(decrypted);
+                if (encPass == null || rawPass == null) {
+                    return false;
+                }
+                byte[] raw = toBytes(rawPass);
                 try {
-                    return Arrays.equals(chars, rawPass);
+                    return matchesDecrypted(encPass, raw);
                 } finally {
-                    scramble(decrypted);
-                    scramble(chars);
+                    scramble(raw);
                 }
             }
         };
@@ -111,12 +131,22 @@ public class GeoServerAesGcmPasswordEncoder extends AbstractGeoserverPasswordEnc
     /** Re-encodes an already encoded password, same contract as the other reversible encoders. */
     @Override
     public String encode(CharSequence rawPassword) {
-        return createCharEncoder().encodePassword(decodeToCharArray(rawPassword.toString()), null);
+        char[] plain = decodeToCharArray(rawPassword.toString());
+        try {
+            return createCharEncoder().encodePassword(plain, null);
+        } finally {
+            scramble(plain);
+        }
     }
 
     @Override
     public String decode(String encPass) throws UnsupportedOperationException {
-        return decodeInternal(stripPrefix(encPass));
+        byte[] decrypted = decryptToBytes(stripPrefix(encPass));
+        try {
+            return new String(decrypted, StandardCharsets.UTF_8);
+        } finally {
+            scramble(decrypted);
+        }
     }
 
     @Override
@@ -129,10 +159,21 @@ public class GeoServerAesGcmPasswordEncoder extends AbstractGeoserverPasswordEnc
         }
     }
 
-    private String decodeInternal(String encPass) {
-        byte[] decrypted = decryptToBytes(encPass);
+    /**
+     * Whether the stored value decrypts to the given bytes. A value that does not decrypt at all, because it was
+     * damaged or written under another key, is a mismatch and not an error. The comparison takes the same time whether
+     * the first byte differs or the last, so timing gives nothing away about the stored password.
+     */
+    private boolean matchesDecrypted(String encPass, byte[] raw) {
+        byte[] decrypted;
         try {
-            return new String(decrypted, StandardCharsets.UTF_8);
+            decrypted = decryptToBytes(encPass);
+        } catch (RuntimeException e) {
+            LOGGER.log(Level.FINE, "Encoded password does not decrypt under alias " + keyAliasInKeyStore, e);
+            return false;
+        }
+        try {
+            return MessageDigest.isEqual(decrypted, raw);
         } finally {
             scramble(decrypted);
         }

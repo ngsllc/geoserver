@@ -10,6 +10,7 @@ import static org.geoserver.security.SecurityUtils.toBytes;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.security.GeneralSecurityException;
 import java.security.Key;
 import java.security.KeyStore;
 import java.security.KeyStoreException;
@@ -253,9 +254,11 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     }
 
     /**
-     * Opens or creates a {@link KeyStore} using the file named by {@link #fileName()}
+     * Opens or creates a {@link KeyStore} using the file named by {@link #fileName()}.
      *
-     * <p>Throws an exception for an invalid master key, or for a keystore that is not of the configured type
+     * <p>A keystore of another format left in place, by an installation that was configured for that format, has its
+     * keys moved into a new keystore of the configured type, see {@link #migrate}. Throws an exception for an invalid
+     * master key, or for a file named for the configured type that holds another format.
      */
     protected void assertActivatedKeyStore() throws IOException {
         if (ks != null) return;
@@ -264,11 +267,16 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
         char[] passwd = securityManager.getMasterPassword();
         try {
             ks = KeyStore.getInstance(keyStoreType());
-            if (getResource().getType() == Type.UNDEFINED) { // create an empy one
-                ks.load(null, passwd);
-                addInitialKeys();
-                try (OutputStream fos = getResource().out()) {
-                    ks.store(fos, passwd);
+            if (getResource().getType() == Type.UNDEFINED) {
+                ExistingKeyStore other = findKeyStoreOfAnotherFormat();
+                if (other != null) {
+                    migrate(other, passwd);
+                } else { // create an empty one
+                    ks.load(null, passwd);
+                    addInitialKeys();
+                    try (OutputStream fos = getResource().out()) {
+                        ks.store(fos, passwd);
+                    }
                 }
             } else {
                 try (InputStream fis = getResource().in()) {
@@ -276,6 +284,7 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
                 }
             }
         } catch (Exception ex) {
+            ks = null;
             if (ex instanceof IOException exception) // avoid useless wrapping
             throw exception;
             throw new IOException(ex);
@@ -285,10 +294,10 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
     }
 
     /**
-     * Refuses to open a keystore that is not of the configured type.
+     * Refuses to open a keystore whose file is named for the configured type but holds another format.
      *
-     * <p>Do not skip this check: without it a keystore left from another type is not found, GeoServer creates an empty
-     * one in its place, and every password encrypted with the old keys silently stops decrypting.
+     * <p>Do not skip this check: without it the file fails to load with a message that says nothing about why, and an
+     * administrator who deletes it to get past that loses the keys every stored password was encrypted with.
      */
     private void assertKeyStoreFormat() throws IOException {
         String type = keyStoreType();
@@ -297,19 +306,149 @@ public class KeyStoreProviderImpl implements BeanNameAware, KeyStoreProvider {
             throw new IOException("Key store " + getResource().path() + " is a " + found + " file, but this "
                     + "installation is configured for " + type + ". Convert the file, or configure that type.");
         }
-        if (getResource().getType() != Type.UNDEFINED) {
-            return;
-        }
-        // no keystore of the configured type: another one left in place means keys, not a fresh install
+    }
+
+    /** A keystore file of another format, found where the configured one should be. */
+    private record ExistingKeyStore(Resource file, KeyStoreFormat format) {}
+
+    /**
+     * The keystore an installation configured for another format left behind, or null on a fresh data directory.
+     * Finding one means keys, not a fresh install: GeoServer must never create an empty keystore next to it, or every
+     * password encrypted with the old keys silently stops decrypting.
+     *
+     * <p>Only a deployment that asks for a keystore type through {@link SecurityDefaults} moves one, and only towards
+     * that type. A stock GeoServer never converts anything: it has no reason to, and a file of another format under
+     * {@code security/} may not be GeoServer's at all — a truststore kept there would be renamed away by a conversion
+     * nobody asked for. Without that setting an existing keystore of another format is reported, as before, and
+     * {@link #reportForeignKeyStore} explains it.
+     */
+    private ExistingKeyStore findKeyStoreOfAnotherFormat() throws IOException {
+        boolean migrates = SecurityDefaults.get(SecurityDefaults.Setting.KEYSTORE_TYPE, null) != null;
         for (KeyStoreFormat format : KeyStoreFormat.values()) {
+            if (format.name().equalsIgnoreCase(keyStoreType())) {
+                continue;
+            }
             Resource other = securityManager.security().get(KeyStoreFormat.fileName(format.name()));
-            if (other.getType() != Type.UNDEFINED) {
-                throw new IOException("Key store " + other.path() + " holds the keys of this installation, but it is "
-                        + "configured for " + type + ", read from "
-                        + getResource().path()
-                        + ". Convert the file, or configure that type.");
+            if (other.getType() == Type.UNDEFINED) {
+                continue;
+            }
+            KeyStoreFormat content = KeyStoreFormat.detect(other);
+            if (content != null && content != format) {
+                // the name and the first bytes disagree: say so, rather than fail to read it and leave the
+                // administrator guessing which of the two is right
+                throw new IOException("Key store " + other.path() + " is named for " + format + " but holds a "
+                        + content + " file. Rename it to " + KeyStoreFormat.fileName(content.name())
+                        + ", or convert it.");
+            }
+            if (!migrates) {
+                reportForeignKeyStore(other);
+            }
+            return new ExistingKeyStore(other, format);
+        }
+        return null;
+    }
+
+    /**
+     * Stops a stock GeoServer that finds a keystore of another format where its own should be. It holds the keys of
+     * some installation, so creating an empty one beside it would silently strand every password encrypted with them.
+     */
+    private void reportForeignKeyStore(Resource other) throws IOException {
+        throw new IOException("Key store " + other.path() + " holds the keys of this installation, but it is "
+                + "configured for " + keyStoreType() + ", read from "
+                + getResource().path()
+                + ". Convert the file, or configure that type.");
+    }
+
+    /**
+     * Moves the keys of a keystore of another format into a new, empty keystore of the configured type, then writes it
+     * and keeps the old file next to it with {@code .backup} appended. This is how a data directory written by a
+     * regular GeoServer, with a JCEKS keystore, starts under FIPS with a BCFKS one and the same keys.
+     *
+     * <p>The old format has to be readable here: a provider has to offer it, and the master password has to open it.
+     * JCEKS is one a FIPS operating system removes from Java, so such a directory is moved on a machine not yet in FIPS
+     * mode, and the message says so.
+     */
+    private void migrate(ExistingKeyStore other, char[] passwd) throws IOException, GeneralSecurityException {
+        String type = keyStoreType();
+        Resource file = other.file();
+        KeyStore source;
+        try {
+            source = KeyStore.getInstance(other.format().name());
+        } catch (KeyStoreException e) {
+            throw new IOException(
+                    "Key store " + file.path() + " holds the keys of this installation, but it is a "
+                            + other.format()
+                            + " file and no crypto provider here offers that format, so its keys cannot be "
+                            + "moved to " + type
+                            + ". Start GeoServer once, with the same configuration, on a Java runtime that "
+                            + "still offers " + other.format()
+                            + ", such as one whose operating system is not in FIPS mode: "
+                            + "the keys are moved there, and the data directory can then be used here. Or delete the file to "
+                            + "start with new keys, after which every stored password has to be entered again.",
+                    e);
+        }
+        try (InputStream in = file.in()) {
+            source.load(in, passwd);
+        } catch (IOException e) {
+            throw new IOException("Could not read key store " + file.path() + " with the master password", e);
+        }
+
+        ks.load(null, passwd);
+        KeyStore.ProtectionParameter protection = new KeyStore.PasswordProtection(passwd);
+        int moved = 0;
+        Enumeration<String> aliases = source.aliases();
+        while (aliases.hasMoreElements()) {
+            String alias = aliases.nextElement();
+            KeyStore.Entry entry;
+            if (source.isCertificateEntry(alias)) {
+                ks.setEntry(alias, new KeyStore.TrustedCertificateEntry(source.getCertificate(alias)), null);
+                moved++;
+                continue;
+            }
+            Key key = source.getKey(alias, passwd);
+            if (key instanceof SecretKey secretKey) {
+                // the label is never read back, and the target format may refuse the one the old file used: keys
+                // written by earlier versions carry "PBE", which BCFKS does not accept
+                entry = new KeyStore.SecretKeyEntry(new SecretKeySpec(secretKey.getEncoded(), KEY_ALGORITHM));
+            } else if (key instanceof PrivateKey privateKey) {
+                entry = new KeyStore.PrivateKeyEntry(privateKey, source.getCertificateChain(alias));
+            } else {
+                LOGGER.warning("Key store " + file.path() + ": entry " + alias + " is of a kind that cannot be moved "
+                        + (key == null ? "" : "(" + key.getClass().getName() + ")") + ", skipped");
+                continue;
+            }
+            ks.setEntry(alias, entry, protection);
+            moved++;
+        }
+        if (!ks.containsAlias(CONFIGPASSWORDKEY)) {
+            addInitialKeys();
+        }
+        // Write through a temporary file and move it into place only once it is whole. Written straight to its
+        // final path, a store() that fails half way leaves a short or empty keystore there, and the next start
+        // finds a file where it expects one, stops entering this branch, and fails to load it for ever, with the
+        // intact source sitting untouched next to it.
+        Resource pending = getResource().parent().get(getResource().name() + ".new");
+        try {
+            try (OutputStream out = pending.out()) {
+                ks.store(out, passwd);
+            }
+            if (!pending.renameTo(getResource())) {
+                throw new IOException("Could not move the converted key store " + pending.path() + " into place as "
+                        + getResource().path());
+            }
+        } finally {
+            if (pending.getType() != Type.UNDEFINED) {
+                pending.delete();
             }
         }
+
+        Resource backup = file.parent().get(file.name() + ".backup");
+        if (backup.getType() != Type.UNDEFINED) {
+            backup.delete();
+        }
+        String kept = file.renameTo(backup) ? backup.path() : file.path() + " (could not be renamed)";
+        LOGGER.warning("Key store " + file.path() + " moved from " + other.format() + " to " + type + " in "
+                + getResource().path() + ": " + moved + " entries, the old file is kept as " + kept);
     }
 
     /* (non-Javadoc)

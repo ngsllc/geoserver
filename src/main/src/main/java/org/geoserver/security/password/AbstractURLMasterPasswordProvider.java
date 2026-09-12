@@ -18,6 +18,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import org.apache.commons.io.IOUtils;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.resource.Resource.Type;
@@ -73,6 +75,38 @@ public abstract class AbstractURLMasterPasswordProvider extends MasterPasswordPr
 
     Resource getConfigDir() throws IOException {
         return getSecurityManager().masterPasswordProvider().get(getName());
+    }
+
+    /**
+     * Copies the stored password to a file next to it, with {@code .backup} appended to the name, before it gets
+     * rewritten in another format. Only a file url can be backed up; anything else is left alone.
+     *
+     * @return the path of the backup, or null when there is nothing to back up
+     */
+    public String backupStoredPassword() throws IOException {
+        URL url = config.getURL();
+        if (url == null || !"file".equalsIgnoreCase(url.getProtocol())) {
+            return null;
+        }
+        File f = URLs.urlToFile(url);
+        if (!f.isAbsolute()) {
+            Resource source = getConfigDir().get(f.getPath());
+            if (source.getType() != Type.RESOURCE) {
+                return null;
+            }
+            Resource backup = source.parent().get(source.name() + ".backup");
+            try (InputStream in = source.in();
+                    OutputStream out = backup.out()) {
+                in.transferTo(out);
+            }
+            return backup.path();
+        }
+        if (!f.isFile()) {
+            return null;
+        }
+        File backup = new File(f.getPath() + ".backup");
+        Files.copy(f.toPath(), backup.toPath(), StandardCopyOption.REPLACE_EXISTING);
+        return backup.getPath();
     }
 
     /** Handles the plain text case so implementations only deal with the protected form. */

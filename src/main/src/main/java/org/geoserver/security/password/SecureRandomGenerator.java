@@ -5,11 +5,12 @@
 package org.geoserver.security.password;
 
 import java.security.SecureRandom;
+import org.geoserver.security.CryptoProviders;
 import org.jasypt.salt.SaltGenerator;
 
 /**
- * Salt generator backed by the JVM default {@link java.security.SecureRandom}, usable with any registered crypto
- * provider.
+ * Salt generator backed by the {@link java.security.SecureRandom} the crypto provider supplier picked, see
+ * {@link CryptoProviders#secureRandom()}, usable with any registered crypto provider.
  *
  * <p>Jasypt's {@code RandomSaltGenerator} asks for {@code SHA1PRNG} by name, and no FIPS-validated provider has it.
  * There is no algorithm name that both the normal JDK providers and the FIPS ones offer, so this asks for no name at
@@ -24,7 +25,7 @@ class SecureRandomGenerator implements SaltGenerator {
     /** Shared on purpose: {@link SecureRandom} is thread safe, and the generator keeps nothing else. */
     static final SecureRandomGenerator INSTANCE = new SecureRandomGenerator();
 
-    private final SecureRandom random = new SecureRandom();
+    private final SecureRandom random = CryptoProviders.secureRandom();
 
     private SecureRandomGenerator() {}
 

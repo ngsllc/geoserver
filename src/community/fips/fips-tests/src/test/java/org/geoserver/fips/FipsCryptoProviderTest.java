@@ -6,6 +6,7 @@ package org.geoserver.fips;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 import static org.junit.Assume.assumeTrue;
 
 import java.security.MessageDigest;
@@ -45,6 +46,27 @@ public class FipsCryptoProviderTest {
         assertEquals(
                 BC_FIPS,
                 Cipher.getInstance("AES/CBC/PKCS5Padding").getProvider().getName());
+    }
+
+    /**
+     * Asked for is not the same as in force: the provider reads the property once, while its class initializes. What
+     * this checks is the mode the calling thread is really held to.
+     */
+    @Test
+    public void testApprovedOnlyModeIsInForce() {
+        CryptoProviders.getProvider();
+        assertTrue(FipsSetup.isApprovedOnlyRequested());
+        assertTrue(FipsSetup.isApprovedOnlyForThisThread());
+        assertEquals("on", FipsSetup.describeApprovedOnlyMode());
+    }
+
+    /** Random bytes have to come from the validated module, whatever the provider order turns into later. */
+    @Test
+    public void testRandomBytesComeFromTheFipsProvider() {
+        assertEquals(BC_FIPS, CryptoProviders.secureRandom().getProvider().getName());
+        assertEquals(
+                FipsCryptoProviderSupplier.FIPS_RANDOM_ALGORITHM,
+                CryptoProviders.secureRandom().getAlgorithm());
     }
 
     /**
