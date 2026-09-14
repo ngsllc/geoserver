@@ -13,9 +13,12 @@ import org.geoserver.platform.GeoServerExtensions;
  * <p>Only add a {@link Setting} when more than one value is workable. An algorithm every provider implements needs no
  * setting, the code just uses it.
  *
- * <p>Implementations are Spring beans, asked only while GeoServer creates configuration that is not there yet. An
- * existing data directory keeps what it was set up with, so installing or removing an implementation never rewrites
- * configuration behind the admin's back.
+ * <p>Implementations are Spring beans. They are asked while GeoServer creates configuration that is not there yet, and
+ * again on startup for an existing data directory that was written under other settings: one whose stored passwords,
+ * keystore or master password use algorithms this deployment's crypto provider cannot work with would otherwise be
+ * unusable. Such a directory is moved to these settings, which rewrites configuration, keeps the previous files with
+ * {@code .backup} appended, and is logged at {@code WARNING}. A deployment with no implementation installed is never
+ * touched.
  */
 public interface SecurityDefaults {
 
@@ -28,9 +31,10 @@ public interface SecurityDefaults {
         /** Class name of the master password provider implementation storing the master password. */
         MASTER_PASSWORD_PROVIDER,
         /**
-         * {@link java.security.KeyStore} type of the GeoServer keystore. Used only when a keystore is created. An
-         * existing file has to be read with the type it was written with, so moving an old data directory means
-         * converting the file, not changing this setting.
+         * {@link java.security.KeyStore} type of the GeoServer keystore. A keystore is created with this type, and an
+         * existing one of another format is converted to it on startup, keeping its keys and the old file. Only a
+         * deployment that answers this setting converts anything; without one an existing keystore of another format
+         * stops GeoServer instead, since a file under {@code security/} may not be GeoServer's to rewrite.
          */
         KEYSTORE_TYPE
     }

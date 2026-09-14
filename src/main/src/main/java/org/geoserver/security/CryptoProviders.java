@@ -5,6 +5,7 @@
 package org.geoserver.security;
 
 import java.security.Provider;
+import java.security.SecureRandom;
 import java.security.Security;
 import java.util.ServiceLoader;
 import java.util.logging.Logger;
@@ -19,6 +20,9 @@ public final class CryptoProviders {
     /** Name of the regular BouncyCastle provider class, absent from the FIPS-validated distribution. */
     private static final String BC_PROVIDER_CLASS = "org.bouncycastle.jce.provider.BouncyCastleProvider";
 
+    private static final CryptoProviderSupplier SUPPLIER =
+            ServiceLoader.load(CryptoProviderSupplier.class).findFirst().orElseGet(BouncyCastleSupplier::new);
+
     private static final Provider PROVIDER = register();
 
     private CryptoProviders() {}
@@ -31,17 +35,36 @@ public final class CryptoProviders {
         return PROVIDER;
     }
 
+    /**
+     * The random source GeoServer draws salts, initialization vectors and keys from, as the supplier wants it. Shared
+     * on purpose: {@link SecureRandom} is thread safe and seeding it is what costs.
+     */
+    public static SecureRandom secureRandom() {
+        return RandomHolder.RANDOM;
+    }
+
     private static Provider register() {
-        CryptoProviderSupplier supplier =
-                ServiceLoader.load(CryptoProviderSupplier.class).findFirst().orElseGet(BouncyCastleSupplier::new);
-        Provider provider = supplier.getProvider();
-        int position = Security.insertProviderAt(provider, supplier.getPosition());
+        Provider provider = SUPPLIER.getProvider();
+        int wanted = SUPPLIER.getPosition();
+        int position = Security.insertProviderAt(provider, wanted);
         if (position == -1) {
             // already there, another class loader or a previous call got here first
             provider = Security.getProvider(provider.getName());
+            if (wanted == 1 && Security.getProviders()[0] != provider) {
+                // registered by someone who did not care where it went. This supplier does: a provider that has
+                // to answer first serves nothing while a JDK provider stands in front of it
+                Security.removeProvider(provider.getName());
+                position = Security.insertProviderAt(provider, wanted);
+                LOGGER.config("Moved crypto provider " + provider.getName() + " to position " + position);
+            }
         }
         LOGGER.config("Registered crypto provider " + provider.getName() + " at position " + position);
+        SUPPLIER.verify(provider);
         return provider;
+    }
+
+    private static final class RandomHolder {
+        static final SecureRandom RANDOM = SUPPLIER.createSecureRandom(PROVIDER);
     }
 
     /**

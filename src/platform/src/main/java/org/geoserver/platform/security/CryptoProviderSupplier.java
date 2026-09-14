@@ -5,6 +5,7 @@
 package org.geoserver.platform.security;
 
 import java.security.Provider;
+import java.security.SecureRandom;
 
 /**
  * Supplies the JCA provider GeoServer registers at startup, looked up through {@link java.util.ServiceLoader}.
@@ -31,5 +32,29 @@ public interface CryptoProviderSupplier {
      */
     default int getPosition() {
         return 0;
+    }
+
+    /**
+     * Called once the provider is registered, with the instance Java will hand algorithms to, which is the one from
+     * {@link #getProvider()} unless another class loader registered the same provider first.
+     *
+     * <p>An implementation that needs the provider in a particular state checks it here and throws when it is not:
+     * GeoServer then refuses to start rather than run believing something about its cryptography that is not true. A
+     * FIPS supplier uses this to make sure approved-only mode is really in force, which it is not if some other code
+     * initialized the provider class before the property asking for it was set.
+     *
+     * @throws IllegalStateException when the provider cannot be used as registered
+     */
+    default void verify(Provider registered) {}
+
+    /**
+     * The source of random bytes for salts, initialization vectors and keys. The default asks the JVM for its own
+     * default, which is what most deployments want. A supplier whose provider has to produce every random byte, as a
+     * FIPS one does, asks its provider by name instead so that provider order can never hand the job to another one.
+     *
+     * @param registered the provider {@link #verify} was called with
+     */
+    default SecureRandom createSecureRandom(Provider registered) {
+        return new SecureRandom();
     }
 }

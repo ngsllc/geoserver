@@ -4,9 +4,11 @@
  */
 package org.geoserver.security.password;
 
-import java.util.Objects;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import org.jasypt.encryption.pbe.PBEStringEncryptor;
 import org.jasypt.exceptions.EncryptionInitializationException;
+import org.jasypt.exceptions.EncryptionOperationNotPossibleException;
 import org.jasypt.util.text.BasicTextEncryptor;
 import org.jasypt.util.text.TextEncryptor;
 import org.springframework.dao.DataAccessException;
@@ -79,14 +81,23 @@ public class JasyptPBEPasswordEncoderWrapper extends AbstractGeoserverPasswordEn
     @Override
     public boolean isPasswordValid(String encPass, String rawPass, Object salt) {
         this.checkInitialization();
-        String decPassword = null;
-        if (this.useTextEncryptor) {
-            decPassword = this.textEncryptor.decrypt(encPass);
-        } else {
-            decPassword = this.pbeStringEncryptor.decrypt(encPass);
+        if (encPass == null || rawPass == null) {
+            return false;
         }
-
-        return Objects.equals(decPassword, rawPass);
+        String decPassword;
+        try {
+            if (this.useTextEncryptor) {
+                decPassword = this.textEncryptor.decrypt(encPass);
+            } else {
+                decPassword = this.pbeStringEncryptor.decrypt(encPass);
+            }
+        } catch (EncryptionOperationNotPossibleException e) {
+            // damaged, or encrypted with another key: not this password, and not an error either
+            return false;
+        }
+        // same time whether the first character differs or the last
+        return MessageDigest.isEqual(
+                decPassword.getBytes(StandardCharsets.UTF_8), rawPass.getBytes(StandardCharsets.UTF_8));
     }
 
     @Override

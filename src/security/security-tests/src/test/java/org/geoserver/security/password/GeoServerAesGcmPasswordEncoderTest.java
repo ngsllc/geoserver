@@ -96,6 +96,30 @@ public class GeoServerAesGcmPasswordEncoderTest extends GeoServerSystemTestSuppo
         assertThrows(RuntimeException.class, () -> encoder.decode(tampered));
     }
 
+    /**
+     * A value that cannot be decrypted is a wrong password, not an error: one damaged entry must not take a login page
+     * down, and a caller checking a password is never told why the check failed.
+     */
+    @Test
+    public void testTamperedValueFailsToMatch() {
+        String encoded = encoder.encodePassword(PASSWORD, null);
+        byte[] raw = Base64.getDecoder().decode(encoded.substring("crypt3:".length()));
+        raw[raw.length - 1] ^= 0x01;
+        String tampered = "crypt3:" + Base64.getEncoder().encodeToString(raw);
+
+        assertFalse(encoder.isPasswordValid(tampered, PASSWORD, null));
+        assertFalse(encoder.isPasswordValid(tampered, PASSWORD_ARRAY, null));
+        assertFalse(encoder.matches(PASSWORD, tampered));
+    }
+
+    @Test
+    public void testGarbageFailsToMatch() {
+        assertFalse(encoder.isPasswordValid("crypt3:AAAA", PASSWORD, null));
+        assertFalse(encoder.isPasswordValid("crypt3:not base64 at all", PASSWORD_ARRAY, null));
+        assertFalse(encoder.isPasswordValid(null, PASSWORD, null));
+        assertFalse(encoder.isPasswordValid(encoder.encodePassword(PASSWORD, null), (char[]) null, null));
+    }
+
     @Test
     public void testTruncatedValueRejected() {
         assertThrows(
