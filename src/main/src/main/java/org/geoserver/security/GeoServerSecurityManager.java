@@ -64,6 +64,7 @@ import org.geoserver.platform.resource.Files;
 import org.geoserver.platform.resource.Paths;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.resource.Resource.Type;
+import org.geoserver.platform.security.SecurityDefaults;
 import org.geoserver.security.auth.AuthenticationCache;
 import org.geoserver.security.auth.GeoServerRootAuthenticationProvider;
 import org.geoserver.security.auth.GuavaAuthenticationCacheImpl;
@@ -1968,7 +1969,9 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         if (mpProviderConfig == null) {
             mpProviderConfig = new URLMasterPasswordProviderConfig();
             mpProviderConfig.setName("default");
-            mpProviderConfig.setClassName(URLMasterPasswordProvider.class.getCanonicalName());
+            mpProviderConfig.setClassName(SecurityDefaults.get(
+                    SecurityDefaults.Setting.MASTER_PASSWORD_PROVIDER,
+                    URLMasterPasswordProvider.class.getCanonicalName()));
             mpProviderConfig.setReadOnly(false);
 
             ((URLMasterPasswordProviderConfig) mpProviderConfig).setURL(new URL("file:passwd"));
@@ -2034,9 +2037,14 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             ugConfig.setCheckInterval(checkInterval);
             ugConfig.setFileName(XMLConstants.FILE_UR);
             ugConfig.setValidating(true);
-            // start with weak encryption, plain passwords can be restored
-            ugConfig.setPasswordEncoderName(loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, false)
-                    .getName());
+            // start with weak encryption, plain passwords can be restored, unless the crypto provider needs
+            // something else
+            String ugEncoderName = SecurityDefaults.get(SecurityDefaults.Setting.USER_GROUP_PASSWORD_ENCODER, null);
+            ugConfig.setPasswordEncoderName(
+                    ugEncoderName != null
+                            ? ugEncoderName
+                            : loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, false)
+                                    .getName());
             ugConfig.setPasswordPolicyName(PasswordValidator.DEFAULT_NAME);
             saveUserGroupService(ugConfig);
             userGroupService = loadUserGroupService(XMLUserGroupService.DEFAULT_NAME);
@@ -2190,8 +2198,10 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         config.setEncryptingUrlParams(false);
 
         // start with weak encryption
-        config.setConfigPasswordEncrypterName(loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, false)
-                .getName());
+        config.setConfigPasswordEncrypterName(SecurityDefaults.get(
+                SecurityDefaults.Setting.CONFIG_PASSWORD_ENCODER,
+                loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, false)
+                        .getName()));
 
         // setup the default remember me service
         RememberMeServicesConfig rememberMeConfig = new RememberMeServicesConfig();
