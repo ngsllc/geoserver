@@ -99,6 +99,7 @@
     <spring.security.oauth2.version>2.5.2.RELEASE</spring.security.oauth2.version>
     <spring-integration.version>5.5.18</spring-integration.version>
     <wicket.version>9.23.0</wicket.version>
+    <fips.argLine></fips.argLine>
     <bc.prov.artifactId>bcprov-jdk18on</bc.prov.artifactId>
     <bc.prov.version>1.79</bc.prov.version>
     <bc.pkix.artifactId>bcpkix-jdk18on</bc.pkix.artifactId>
@@ -1327,7 +1328,7 @@
                Additional needs for JAI: java.desktop/sun.awt.image 
                Additional needs for LDAP tests:  java.naming/com.sun.jndi.ldap
             -->
-          <argLine>@{argLine} -XX:+IgnoreUnrecognizedVMOptions -Dfile.encoding=UTF-8 --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED  --add-opens=java.desktop/sun.awt.image=ALL-UNNAMED --add-opens=java.naming/com.sun.jndi.ldap=ALL-UNNAMED</argLine>
+          <argLine>@{argLine} -XX:+IgnoreUnrecognizedVMOptions -Dfile.encoding=UTF-8 --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED  --add-opens=java.desktop/sun.awt.image=ALL-UNNAMED --add-opens=java.naming/com.sun.jndi.ldap=ALL-UNNAMED ${fips.argLine}</argLine>
         </configuration>
       </plugin>
 
@@ -1891,6 +1892,31 @@
           </dependency>
         </dependencies>
       </dependencyManagement>
+    </profile>
+    <profile>
+      <!-- Verification build: run as -Pfips,fips-test, it has no effect on its own since it
+           does not swap the jars. Puts the forked test JVM in approved-only mode and hides the
+           services a FIPS operating system does not have, so a build here fails on what a
+           deployment fails on: SHA1PRNG, the JCEKS keystore and the password based ciphers.
+           See RestrictedJdkProviders for the list and where it was measured.
+           It deliberately leaves MD5, SHA-1, DES, JKS and TLS alone, because a FIPS system
+           keeps offering those; an earlier version removed them and produced a pile of work no
+           installation needs. The FIPS virtual machine, described in the FIPS notes, is what
+           checks that this profile still tells the truth. -->
+      <id>fips-test</id>
+      <properties>
+        <fips.argLine>-Dorg.bouncycastle.fips.approved_only=true -Dgeoserver.fips.test=true</fips.argLine>
+      </properties>
+      <dependencies>
+        <dependency>
+          <!-- gs-main brings the provider module along for everything below it, but the two
+               modules above it, gs-platform and gs-ows, cannot depend on it: gs-fips-provider
+               depends on gs-platform itself. They at least get the jars. -->
+          <groupId>org.bouncycastle</groupId>
+          <artifactId>${bc.prov.artifactId}</artifactId>
+          <scope>test</scope>
+        </dependency>
+      </dependencies>
     </profile>
     <profile>
       <!-- optional:geosolutions repo when resolving dependencies      -->
