@@ -18,6 +18,7 @@
   <modules>
     <module>fips-provider</module>
     <module>fips-tests</module>
+    <module>web-fips</module>
   </modules>
 
   <build>
