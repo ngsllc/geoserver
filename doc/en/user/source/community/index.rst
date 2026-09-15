@@ -32,6 +32,7 @@ officially part of the GeoServer releases. They are however built along with the
    elasticsearch/index
    features-autopopulate/index
    features-templating/index
+   fips/index
    flatgeobuf/index
    gdal/index
    geoparquet/index

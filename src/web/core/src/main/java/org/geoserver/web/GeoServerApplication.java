@@ -61,7 +61,9 @@ import org.geoserver.web.spring.security.GeoServerSession;
 import org.geoserver.web.util.DataDirectoryConverterLocator;
 import org.geoserver.web.util.GeoToolsConverterAdapter;
 import org.geoserver.web.util.converters.StringBBoxConverter;
+import org.geoserver.web.wicket.KeyInSessionAesCryptFactory;
 import org.geoserver.web.wicket.ParamResourceModel;
+import org.geoserver.web.wicket.WicketSecureRandomSupplier;
 import org.geotools.data.util.MeasureConverterFactory;
 import org.geotools.geometry.jts.ReferencedEnvelope;
 import org.geotools.measure.Measure;
@@ -236,6 +238,11 @@ public class GeoServerApplication extends WebApplication
         // install webjars, eg. for wicketstuff select2
         WicketWebjars.install(this);
 
+        // fips secure Wicket random supplier
+        getSecuritySettings().setRandomSupplier(new WicketSecureRandomSupplier());
+        // works like Wicket's own default, one key per session, but encrypts with AES-CBC instead
+        // of the password based cipher Wicket names, which no FIPS provider has
+        getSecuritySettings().setCryptFactory(new KeyInSessionAesCryptFactory());
         // enable GeoServer custom resource locators
         getResourceSettings().setUseMinifiedResources(false);
         getResourceSettings().setResourceStreamLocator(new GeoServerResourceStreamLocator());
@@ -267,8 +274,6 @@ public class GeoServerApplication extends WebApplication
         getDebugSettings().setAjaxDebugModeEnabled(false);
         getJavaScriptLibrarySettings().setJQueryReference(JQueryResourceReference.INSTANCE_3);
         getApplicationSettings().setPageExpiredErrorPage(GeoServerExpiredPage.class);
-        // generates infinite redirections, commented out for the moment
-        // getSecuritySettings().setCryptFactory(GeoserverWicketEncrypterFactory.get());
 
         // theoretically, this replaces the old GeoServerRequestEncodingStrategy
         // by making the URLs encrypted at will

@@ -64,6 +64,7 @@ import org.geoserver.platform.resource.Files;
 import org.geoserver.platform.resource.Paths;
 import org.geoserver.platform.resource.Resource;
 import org.geoserver.platform.resource.Resource.Type;
+import org.geoserver.platform.security.SecurityDefaults;
 import org.geoserver.security.auth.AuthenticationCache;
 import org.geoserver.security.auth.GeoServerRootAuthenticationProvider;
 import org.geoserver.security.auth.GuavaAuthenticationCacheImpl;
@@ -118,6 +119,7 @@ import org.geoserver.security.impl.GroupAdminProperty;
 import org.geoserver.security.impl.RESTAccessRuleDAO;
 import org.geoserver.security.impl.ServiceAccessRuleDAO;
 import org.geoserver.security.impl.Util;
+import org.geoserver.security.password.AbstractURLMasterPasswordProvider;
 import org.geoserver.security.password.ConfigurationPasswordEncryptionHelper;
 import org.geoserver.security.password.GeoServerDigestPasswordEncoder;
 import org.geoserver.security.password.GeoServerPBEPasswordEncoder;
@@ -147,6 +149,7 @@ import org.geotools.util.Version;
 import org.geotools.util.logging.Logging;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.BeanCreationException;
+import org.springframework.beans.factory.NoSuchBeanDefinitionException;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.context.ApplicationEvent;
@@ -424,14 +427,280 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         try {
             // check for an outstanding masster password change
             keyStoreProvider.commitMasterPasswordChange();
+            // a data directory written under other security defaults, most often a regular one now
+            // running under FIPS, gets moved to the defaults of this deployment, see the three methods
+            migrateMasterPasswordProvider();
+            SecurityManagerConfig migratedConfig = migrateConfigPasswordEncoder();
             // check if there is an outstanding keystore password change in case of spring injection
-            init();
+            if (migratedConfig == null) {
+                init();
+            } else {
+                // The new encoder has to be in force before the stored values can be written with it, but
+                // config.xml keeps naming the old one until they have been. Anything that fails in between
+                // then leaves a directory the next start migrates again, rather than one that names an
+                // encoder none of its values were ever written with. This is the order saveSecurityConfig
+                // uses for the same reason.
+                initFrom(migratedConfig);
+                updateConfigurationFilesWithEncryptedFields();
+                xStreamPersist(security().get(CONFIG_FILENAME), migratedConfig, globalPersister());
+            }
+            migrateUserGroupPasswordEncoders();
             for (GeoServerSecurityProvider securityProvider :
                     GeoServerExtensions.extensions(GeoServerSecurityProvider.class)) {
                 securityProvider.init(this);
             }
         } catch (Exception e) {
             throw new BeanCreationException("Error occured reading security configuration", e);
+        }
+    }
+
+    /**
+     * Moves the master password to the provider the deployment's {@link SecurityDefaults} name, when the data directory
+     * still uses another one that protects it with password based encryption. That is the case of a directory written
+     * by a regular GeoServer and now run under FIPS: its {@link URLMasterPasswordProvider} protects the password with
+     * MD5/DES, which the FIPS provider does not offer, and the master password is the first thing read at startup.
+     *
+     * <p>The old provider has to be able to read the file here, so this works while the JVM still offers the old
+     * cipher: on a machine not yet in FIPS mode, or one where the Java security policy keeps the JDK providers whole.
+     * The old file is kept with {@code .backup} appended.
+     */
+    void migrateMasterPasswordProvider() throws Exception {
+        String target = SecurityDefaults.get(SecurityDefaults.Setting.MASTER_PASSWORD_PROVIDER, null);
+        if (target == null || masterPasswordConfig == null) {
+            return;
+        }
+        String name = masterPasswordConfig.getProviderName();
+        MasterPasswordProviderConfig config = loadMasterPassswordProviderConfig(name);
+        if (config == null || target.equals(config.getClassName())) {
+            return;
+        }
+        if (!(config instanceof URLMasterPasswordProviderConfig urlConfig) || !urlConfig.isEncrypting()) {
+            return; // stored in plain text, or by a provider of another kind: nothing here to re-encrypt
+        }
+        if (config.isReadOnly()) {
+            LOGGER.severe("Master password provider '" + name + "' is " + config.getClassName()
+                    + " while this installation defaults to " + target + ", but it is read only, so the stored "
+                    + "master password is left as it is and this installation cannot read it once the old "
+                    + "algorithms are gone. Store it again through a writable provider.");
+            return;
+        }
+        URL url = urlConfig.getURL();
+        if (url != null && !"file".equalsIgnoreCase(url.getProtocol())) {
+            // Nothing here can be undone: the old form cannot be kept anywhere, since backupStoredPassword only
+            // copies a file. Rewriting it would leave a deployment whose master password is in a format its own
+            // provider cannot read, with no copy of what was there before.
+            LOGGER.severe("Master password provider '" + name + "' keeps the password at " + url.getProtocol()
+                    + ", which cannot be backed up, so it is left as it is. Store it again from "
+                    + "Security > Passwords once this installation is running, or this installation cannot read it "
+                    + "once the old algorithms are gone.");
+            return;
+        }
+        MasterPasswordProvider current = loadMasterPasswordProvider(name);
+        char[] password = readMasterPasswordForMigration(current, name, config.getClassName());
+        try {
+            String backup = current instanceof AbstractURLMasterPasswordProvider provider
+                    ? provider.backupStoredPassword()
+                    : null;
+            String previous = config.getClassName();
+            config.setClassName(target);
+            masterPasswordProviderHelper.saveConfig(config);
+            try {
+                loadMasterPasswordProvider(name).setMasterPassword(password);
+            } catch (Exception e) {
+                config.setClassName(previous);
+                masterPasswordProviderHelper.saveConfig(config);
+                throw e;
+            }
+            LOGGER.warning("Master password provider '" + name + "' switched from " + previous + " to " + target
+                    + ", the stored master password was written again in the new format"
+                    + (backup != null ? ", the old file is kept as " + backup : ""));
+        } finally {
+            disposePassword(password);
+        }
+    }
+
+    /**
+     * Reads the master password with the provider the data directory names, for the migration.
+     *
+     * <p>This is the first thing the migration does and the first thing that fails on a machine already in FIPS mode:
+     * the old provider protects the password with an algorithm the Java runtime no longer offers, and what comes out is
+     * an exception from deep inside the encryption library that mentions neither the master password nor FIPS. The
+     * message is replaced with one that says which file could not be read and what to do about it.
+     */
+    private char[] readMasterPasswordForMigration(MasterPasswordProvider provider, String name, String className)
+            throws Exception {
+        try {
+            return provider.getMasterPassword();
+        } catch (Exception e) {
+            throw new IOException(
+                    "The master password of provider '" + name + "' cannot be read with " + className
+                            + ", which protects it with an algorithm this Java runtime does not offer. A machine in FIPS mode "
+                            + "removes those algorithms, so this data directory has to be started once on a machine that is "
+                            + "not yet in FIPS mode, which moves the master password to an approved algorithm; it can then be "
+                            + "used here. See the FIPS documentation, 'Moving an existing data directory'.",
+                    e);
+        }
+    }
+
+    /**
+     * Switches the configuration password encoder to the one the deployment's {@link SecurityDefaults} name, when the
+     * data directory still uses a password based one ({@code crypt1}, {@code crypt2}). Runs before initialization,
+     * because the validation that follows would refuse an encoder whose cipher the provider lacks; the stored values
+     * are written again right after it, while the old encoder can still read them, see
+     * {@link GeoServerPBEPasswordEncoder}.
+     *
+     * <p>Nothing is written here. The caller brings the returned configuration into force, writes the stored values
+     * again with it and only then commits it to disk, so that a failure at any point leaves a data directory that still
+     * names the encoder its values were written with.
+     *
+     * @return the configuration carrying the new encoder name, which the caller commits once the stored values have
+     *     been written with it, or null when nothing changed
+     */
+    SecurityManagerConfig migrateConfigPasswordEncoder() throws IOException {
+        String target = SecurityDefaults.get(SecurityDefaults.Setting.CONFIG_PASSWORD_ENCODER, null);
+        Resource configFile = security().get(CONFIG_FILENAME);
+        if (target == null || configFile.getType() != Type.RESOURCE) {
+            return null;
+        }
+        SecurityManagerConfig config = loadSecurityConfig();
+        String current = config.getConfigPasswordEncrypterName();
+        if (current == null || current.equals(target)) {
+            return null;
+        }
+        GeoServerPBEPasswordEncoder old = passwordBasedEncoder(current);
+        if (old == null) {
+            return null;
+        }
+        if (!old.canDecode()) {
+            LOGGER.severe("The configuration password encoder '" + current + "' uses " + old.getAlgorithm()
+                    + ", which no crypto provider here offers, so the passwords it encrypted (" + old.getPrefix()
+                    + ":) cannot be read or moved to '" + target + "' and have to be entered again");
+        }
+        LOGGER.warning("Configuration password encoder switched from '" + current + "' (" + old.getPrefix() + ":) to '"
+                + target + "', the stored configuration passwords are written again with it");
+        config.setConfigPasswordEncrypterName(target);
+        return config;
+    }
+
+    /**
+     * Moves every user group service that encrypts its passwords with a password based encoder ({@code crypt1},
+     * {@code crypt2}) to the encoder the deployment's {@link SecurityDefaults} name, writing every password again. Runs
+     * after initialization, while the old encoder can still read the values. A service that cannot be written is
+     * reported instead: its users cannot log in once the old cipher is gone.
+     */
+    void migrateUserGroupPasswordEncoders() throws Exception {
+        String target = SecurityDefaults.get(SecurityDefaults.Setting.USER_GROUP_PASSWORD_ENCODER, null);
+        if (target == null) {
+            return;
+        }
+        for (String name : listUserGroupServices()) {
+            SecurityUserGroupServiceConfig config = userGroupServiceHelper.loadConfig(name, true);
+            String encoderName = config.getPasswordEncoderName();
+            if (encoderName == null || encoderName.equals(target)) {
+                continue;
+            }
+            GeoServerPBEPasswordEncoder old = passwordBasedEncoder(encoderName);
+            if (old == null) {
+                continue;
+            }
+            GeoServerUserGroupService service = loadUserGroupService(name);
+            if (service == null) {
+                continue;
+            }
+            if (!service.canCreateStore()) {
+                LOGGER.severe("User group service '" + name + "' is read only and its passwords use the '" + encoderName
+                        + "' encoder, which this installation cannot write with, so they cannot be moved to '" + target
+                        + "'");
+                continue;
+            }
+            if (!old.canDecode()) {
+                LOGGER.severe("User group service '" + name + "' encrypts its passwords with '" + encoderName + "' ("
+                        + old.getAlgorithm() + "), which no crypto provider here offers, so they cannot be read or "
+                        + "moved to '" + target + "' and have to be set again");
+                continue;
+            }
+            GeoServerPasswordEncoder replacement = loadPasswordEncoder(target);
+            old.initializeFor(service);
+            replacement.initializeFor(service);
+            GeoServerUserGroupStore store = service.createStore();
+            int moved = 0;
+            int failed = 0;
+            for (GeoServerUser user : service.getUsers()) {
+                String stored = user.getPassword();
+                if (stored == null || !old.isResponsibleForEncoding(stored)) {
+                    continue;
+                }
+                if (movePassword(user, old, replacement, store, name)) {
+                    moved++;
+                } else {
+                    failed++;
+                }
+            }
+            store.store();
+            config.setPasswordEncoderName(target);
+            userGroupServiceHelper.saveConfig(config);
+            userGroupServices.remove(name);
+            LOGGER.warning("User group service '" + name + "' switched from the '" + encoderName
+                    + "' password encoder to '" + target + "', " + moved + " password(s) written again"
+                    + (failed > 0 ? ", " + failed + " left as they were, see the messages above" : ""));
+        }
+    }
+
+    /**
+     * Writes one user's password again with the new encoder, and reports whether it worked.
+     *
+     * <p>Two things this must not do. It must not let one password stop the migration: a stored value can be damaged,
+     * hand edited, or encrypted under another installation's key, and throwing here would abort startup for the whole
+     * instance over a single row that could not be read anyway. And it must not write a password that differs from the
+     * one it read: the old ciphertext is about to be overwritten and is the only copy, so the new value is checked
+     * before it is kept.
+     *
+     * <p>The plain text moves as a {@link String} rather than a {@code char[]} on purpose. The character array methods
+     * of both encoders convert through {@link java.nio.charset.Charset#defaultCharset()}, while a password submitted at
+     * login is compared as UTF-8; on a JVM whose default charset is neither (Windows, where it is the ANSI code page)
+     * every character outside that charset would be written back as {@code ?} and the user could never log in again.
+     * The {@link String} methods of both encoders are UTF-8 on both sides, which is what login uses.
+     *
+     * @return true when the password was written again, false when it was left as it was
+     */
+    private boolean movePassword(
+            GeoServerUser user,
+            GeoServerPasswordEncoder old,
+            GeoServerPasswordEncoder replacement,
+            GeoServerUserGroupStore store,
+            String serviceName) {
+        String stored = user.getPassword();
+        try {
+            String plain = old.decode(stored);
+            String encoded = replacement.encodePassword(plain, null);
+            if (!replacement.isPasswordValid(encoded, plain, null)) {
+                // cannot happen through either encoder as they stand; kept because the alternative to noticing
+                // here is a user who is locked out with no way back, the old value having just been overwritten
+                LOGGER.severe("User group service '" + serviceName + "': the password of user '" + user.getUsername()
+                        + "' does not read back after being written again with '" + replacement.getName()
+                        + "', so it is left as it was");
+                return false;
+            }
+            user.setPassword(encoded);
+            store.updateUser(user);
+            return true;
+        } catch (Exception e) {
+            LOGGER.log(
+                    Level.SEVERE,
+                    "User group service '" + serviceName + "': the password of user '" + user.getUsername()
+                            + "' cannot be read with the '" + old.getName() + "' encoder, so it is left as it is and "
+                            + "that user cannot log in. Set the password again for this user.",
+                    e);
+            return false;
+        }
+    }
+
+    /** The named encoder when it is a password based one, otherwise null; a name matching no bean is null too. */
+    private GeoServerPBEPasswordEncoder passwordBasedEncoder(String name) {
+        try {
+            return loadPasswordEncoder(name) instanceof GeoServerPBEPasswordEncoder pbe ? pbe : null;
+        } catch (NoSuchBeanDefinitionException e) {
+            return null;
         }
     }
 
@@ -565,9 +834,17 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
      * loads configuration and initializes the security subsystem.
      */
     void init() throws Exception {
+        initFrom(loadSecurityConfig());
+    }
+
+    /**
+     * Initializes from a configuration that is not (yet) the one on disk, so that a migration can bring the new
+     * configuration into force before it commits it, see {@link #migrateConfigPasswordEncoder()}.
+     */
+    private void initFrom(SecurityManagerConfig config) throws Exception {
         clearCaches();
         init(loadMasterPasswordConfig());
-        init(loadSecurityConfig());
+        init(config);
         fireChanged();
     }
 
@@ -1968,7 +2245,9 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         if (mpProviderConfig == null) {
             mpProviderConfig = new URLMasterPasswordProviderConfig();
             mpProviderConfig.setName("default");
-            mpProviderConfig.setClassName(URLMasterPasswordProvider.class.getCanonicalName());
+            mpProviderConfig.setClassName(SecurityDefaults.get(
+                    SecurityDefaults.Setting.MASTER_PASSWORD_PROVIDER,
+                    URLMasterPasswordProvider.class.getCanonicalName()));
             mpProviderConfig.setReadOnly(false);
 
             ((URLMasterPasswordProviderConfig) mpProviderConfig).setURL(new URL("file:passwd"));
@@ -2034,9 +2313,14 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
             ugConfig.setCheckInterval(checkInterval);
             ugConfig.setFileName(XMLConstants.FILE_UR);
             ugConfig.setValidating(true);
-            // start with weak encryption, plain passwords can be restored
-            ugConfig.setPasswordEncoderName(loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, false)
-                    .getName());
+            // start with weak encryption, plain passwords can be restored, unless the crypto provider needs
+            // something else
+            String ugEncoderName = SecurityDefaults.get(SecurityDefaults.Setting.USER_GROUP_PASSWORD_ENCODER, null);
+            ugConfig.setPasswordEncoderName(
+                    ugEncoderName != null
+                            ? ugEncoderName
+                            : loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, null, false)
+                                    .getName());
             ugConfig.setPasswordPolicyName(PasswordValidator.DEFAULT_NAME);
             saveUserGroupService(ugConfig);
             userGroupService = loadUserGroupService(XMLUserGroupService.DEFAULT_NAME);
@@ -2190,8 +2474,10 @@ public class GeoServerSecurityManager implements ApplicationContextAware, Applic
         config.setEncryptingUrlParams(false);
 
         // start with weak encryption
-        config.setConfigPasswordEncrypterName(loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, false)
-                .getName());
+        config.setConfigPasswordEncrypterName(SecurityDefaults.get(
+                SecurityDefaults.Setting.CONFIG_PASSWORD_ENCODER,
+                loadPasswordEncoder(GeoServerPBEPasswordEncoder.class, true, false)
+                        .getName()));
 
         // setup the default remember me service
         RememberMeServicesConfig rememberMeConfig = new RememberMeServicesConfig();

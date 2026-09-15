@@ -21,6 +21,13 @@
   <dependencies>
 
     <dependency>
+      <!-- surefire has it at run time already; declared so RestrictedJdkProvidersListener compiles -->
+      <groupId>org.junit.platform</groupId>
+      <artifactId>junit-platform-launcher</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <dependency>
       <groupId>org.apache.tika</groupId>
       <artifactId>tika-core</artifactId>
     </dependency>
@@ -228,7 +235,7 @@
     </dependency>
     <dependency>
       <groupId>org.bouncycastle</groupId>
-      <artifactId>bcprov-jdk18on</artifactId>
+      <artifactId>${bc.prov.artifactId}</artifactId>
     </dependency>
 
     <dependency>
@@ -299,4 +306,23 @@
       </plugin>
     </plugins>
   </build>
+
+  <profiles>
+    <profile>
+      <!-- Under -Pfips, gs-main depends on the crypto provider module so the FIPS provider is
+           chosen through the extension point. Declared here rather than in each module because
+           compile scope is inherited and test scope is not. Core then depends on a community
+           module, which the profile being off by default keeps out of a normal build.
+           It names gs-fips-provider, never gs-fips-tests, which depends on gs-main and would
+           close a cycle. -->
+      <id>fips</id>
+      <dependencies>
+        <dependency>
+          <groupId>org.geoserver.community</groupId>
+          <artifactId>gs-fips-provider</artifactId>
+          <version>${project.version}</version>
+        </dependency>
+      </dependencies>
+    </profile>
+  </profiles>
 </project>

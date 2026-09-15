@@ -193,7 +193,23 @@ public class StatusPageTest extends GeoServerWicketTestSupport {
     public void testModuleStatusPopup() {
         tester.assertRenderedPage(StatusPage.class);
         tester.clickLink("tabs:tabs-container:tabs:1:link", true);
-        tester.clickLink("tabs:panel:listViewContainer:modules:0:msg", true);
+
+        @SuppressWarnings("unchecked")
+        ListView<ModuleStatus> modules = (ListView<ModuleStatus>)
+                tester.getComponentFromLastRenderedPage("tabs:panel:listViewContainer:modules");
+        int index = 0;
+        int found = -1;
+        for (ModuleStatus item : modules.getList()) {
+            if (item.getModule().equals("gs-main")) {
+                found = index;
+            }
+            index++;
+        }
+        if (found == -1) {
+            fail("Module gs-main not found, required for this check");
+        }
+
+        tester.clickLink("tabs:panel:listViewContainer:modules:" + found + ":msg", true);
         tester.assertRenderedPage(StatusPage.class);
         tester.assertContains("GeoServer Main");
         tester.assertContains("gs-main");
